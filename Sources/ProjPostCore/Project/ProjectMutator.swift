@@ -1,9 +1,12 @@
 import Foundation
+import PathKit
+import XcodeProj
 
 public struct ProjectMutationRequest: Equatable {
     public var projectRoot: URL
     public var pbxprojURL: URL
     public var infoPlistURL: URL?
+    public var targetName: String?
     public var currentBundleID: String?
     public var newBundleID: String?
     public var currentVersion: String?
@@ -15,6 +18,7 @@ public struct ProjectMutationRequest: Equatable {
         projectRoot: URL,
         pbxprojURL: URL,
         infoPlistURL: URL?,
+        targetName: String? = nil,
         currentBundleID: String?,
         newBundleID: String?,
         currentVersion: String?,
@@ -25,6 +29,7 @@ public struct ProjectMutationRequest: Equatable {
         self.projectRoot = projectRoot
         self.pbxprojURL = pbxprojURL
         self.infoPlistURL = infoPlistURL
+        self.targetName = targetName
         self.currentBundleID = currentBundleID
         self.newBundleID = newBundleID
         self.currentVersion = currentVersion
@@ -52,6 +57,8 @@ public enum ProjectMutatorError: Error, Equatable {
     case noChanges
     case missingCurrentValue(String)
     case expectedSettingNotFound(String)
+    case targetNotFound
+    case ambiguousTarget([String])
 }
 
 public final class ProjectMutator {
@@ -77,6 +84,7 @@ public final class ProjectMutator {
             projectRoot: projectRoot,
             pbxprojURL: pbxprojURL,
             infoPlistURL: infoPlistURL,
+            targetName: project.scheme,
             currentBundleID: project.bundleID,
             newBundleID: targetBundleID,
             currentVersion: project.version,
@@ -136,35 +144,23 @@ public final class ProjectMutator {
     public func apply(_ plan: ProjectMutationPlan) throws {
         try backup(plan)
 
-        var pbxData = try fileSystem.readData(plan.request.pbxprojURL)
-        var pbxText = String(data: pbxData, encoding: .utf8) ?? ""
+        let xcodeprojURL = plan.request.pbxprojURL.deletingLastPathComponent()
+        let project = try XcodeProj(path: Path(xcodeprojURL.path))
+        let target = try targetToMutate(in: project, request: plan.request)
 
-        if let old = plan.request.currentBundleID, let new = plan.request.newBundleID, old != new {
-            pbxText = try replacingSetting(
-                "PRODUCT_BUNDLE_IDENTIFIER = \(old);",
-                in: pbxText,
-                with: "PRODUCT_BUNDLE_IDENTIFIER = \(new);"
-            )
+        for configuration in target.buildConfigurationList?.buildConfigurations ?? [] {
+            if let new = plan.request.newBundleID {
+                configuration.buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] = new
+            }
+            if let new = plan.request.newVersion {
+                configuration.buildSettings["MARKETING_VERSION"] = new
+            }
+            if let new = plan.request.newBuildNumber {
+                configuration.buildSettings["CURRENT_PROJECT_VERSION"] = new
+            }
         }
 
-        if let old = plan.request.currentVersion, let new = plan.request.newVersion, old != new {
-            pbxText = try replacingSetting(
-                "MARKETING_VERSION = \(old);",
-                in: pbxText,
-                with: "MARKETING_VERSION = \(new);"
-            )
-        }
-
-        if let old = plan.request.currentBuildNumber, let new = plan.request.newBuildNumber, old != new {
-            pbxText = try replacingSetting(
-                "CURRENT_PROJECT_VERSION = \(old);",
-                in: pbxText,
-                with: "CURRENT_PROJECT_VERSION = \(new);"
-            )
-        }
-
-        pbxData = Data(pbxText.utf8)
-        try fileSystem.writeData(pbxData, to: plan.request.pbxprojURL)
+        try project.write(path: Path(xcodeprojURL.path), override: true)
     }
 
     private func backup(_ plan: ProjectMutationPlan) throws {
@@ -195,14 +191,6 @@ public final class ProjectMutator {
         )
     }
 
-    private func replacingSetting(_ oldValue: String, in text: String, with newValue: String) throws -> String {
-        guard text.contains(oldValue) else {
-            throw ProjectMutatorError.expectedSettingNotFound(oldValue)
-        }
-
-        return text.replacingOccurrences(of: oldValue, with: newValue)
-    }
-
     private func resolvePBXProjURL(project: ProjectProfile, projectRoot: URL) -> URL {
         if let projectFilePath = project.projectFilePath {
             return URL(fileURLWithPath: projectFilePath).appendingPathComponent("project.pbxproj")
@@ -215,5 +203,44 @@ public final class ProjectMutator {
         let formatter = ISO8601DateFormatter()
         let timestamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
         return "\(timestamp)-\(UUID().uuidString)"
+    }
+
+    private func targetToMutate(in project: XcodeProj, request: ProjectMutationRequest) throws -> PBXNativeTarget {
+        let targets = project.pbxproj.nativeTargets
+
+        if let targetName = request.targetName?.trimmingCharacters(in: .whitespacesAndNewlines), !targetName.isEmpty {
+            let namedTargets = targets.filter { $0.name == targetName }
+            if namedTargets.count == 1 {
+                return namedTargets[0]
+            }
+            if namedTargets.count > 1 {
+                throw ProjectMutatorError.ambiguousTarget(namedTargets.map(\.name))
+            }
+        }
+
+        let matchingTargets = targets.filter { targetMatchesCurrentSettings($0, request: request) }
+        switch matchingTargets.count {
+        case 1:
+            return matchingTargets[0]
+        case 0:
+            throw ProjectMutatorError.targetNotFound
+        default:
+            throw ProjectMutatorError.ambiguousTarget(matchingTargets.map(\.name))
+        }
+    }
+
+    private func targetMatchesCurrentSettings(_ target: PBXNativeTarget, request: ProjectMutationRequest) -> Bool {
+        let configurations = target.buildConfigurationList?.buildConfigurations ?? []
+        guard !configurations.isEmpty else { return false }
+        return configurations.contains { configuration in
+            settingsMatch(configuration.buildSettings, key: "PRODUCT_BUNDLE_IDENTIFIER", expected: request.currentBundleID) &&
+            settingsMatch(configuration.buildSettings, key: "MARKETING_VERSION", expected: request.currentVersion) &&
+            settingsMatch(configuration.buildSettings, key: "CURRENT_PROJECT_VERSION", expected: request.currentBuildNumber)
+        }
+    }
+
+    private func settingsMatch(_ settings: [String: Any], key: String, expected: String?) -> Bool {
+        guard let expected else { return true }
+        return settings[key] as? String == expected
     }
 }

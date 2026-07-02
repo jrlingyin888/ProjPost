@@ -51,7 +51,10 @@ final class UploadJobRunnerTests: XCTestCase {
         let exportCommand = runner.commands[1]
         let keyPathIndex = try XCTUnwrap(exportCommand.arguments.firstIndex(of: "-authenticationKeyPath"))
         let keyPath = try XCTUnwrap(exportCommand.arguments[safe: keyPathIndex + 1])
-        XCTAssertEqual(keyPath, FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_ABC123DEF4.p8").path)
+        XCTAssertTrue(keyPath.contains("projpost-upload-"))
+        XCTAssertTrue(keyPath.hasSuffix("/AuthKey_ABC123DEF4.p8"))
+        XCTAssertNotEqual(keyPath, FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_ABC123DEF4.p8").path)
+        XCTAssertEqual(fileSystem.permissionWrites[URL(fileURLWithPath: keyPath)], 0o600)
         XCTAssertEqual(runner.capturedAuthenticationKeyContents, "-----BEGIN PRIVATE KEY-----\nABC123\n-----END PRIVATE KEY-----")
         XCTAssertFalse(fileSystem.fileExists(URL(fileURLWithPath: keyPath)))
 
@@ -114,7 +117,62 @@ final class UploadJobRunnerTests: XCTestCase {
         }
 
         XCTAssertEqual(vault.requests, [account.id])
-        XCTAssertFalse(fileSystem.fileExists(FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_ABC123DEF4.p8")))
+        let keyPathIndex = try XCTUnwrap(runner.commands[1].arguments.firstIndex(of: "-authenticationKeyPath"))
+        let keyPath = try XCTUnwrap(runner.commands[1].arguments[safe: keyPathIndex + 1])
+        XCTAssertFalse(fileSystem.fileExists(URL(fileURLWithPath: keyPath)))
+        XCTAssertFalse(fileSystem.directories.keys.contains(URL(fileURLWithPath: keyPath).deletingLastPathComponent().path))
+    }
+
+    func testVaultDrivenRunsUseUniqueTemporaryKeyDirectories() async throws {
+        let fileSystem = MemoryFileSystem()
+        let vault = RecordingCredentialVault(privateKey: "PRIVATE KEY")
+        let runner = SequencedCommandRunner(results: [
+            CommandResult(exitCode: 0, stdout: "archive ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: "export ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: "upload ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: "archive ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: "export ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: "upload ok", stderr: "")
+        ], fileSystem: fileSystem, exportArtifacts: ["Demo.ipa"])
+        let jobRunner = UploadJobRunner(
+            commandRunner: runner,
+            commandBuilder: UploadCommandBuilder(),
+            fileSystem: fileSystem,
+            credentialVault: vault
+        )
+        let project = ProjectProfile(
+            name: "Demo",
+            projectPath: "/tmp/Demo",
+            workspacePath: "/tmp/Demo/Demo.xcworkspace",
+            projectFilePath: nil,
+            scheme: "Demo",
+            configuration: "Release",
+            bundleID: "com.example.demo",
+            version: "1.0.0",
+            buildNumber: "1",
+            teamID: "ABCDE12345",
+            selectedAccountID: nil,
+            lastUpload: nil
+        )
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            displayName: "Company",
+            keyID: "ABC123DEF4",
+            issuerID: "issuer",
+            teamID: "ACCOUNTTEAM1",
+            lastVerifiedAt: nil
+        )
+
+        _ = try await jobRunner.runLocalUpload(project: project, account: account)
+        _ = try await jobRunner.runLocalUpload(project: project, account: account)
+
+        let exportCommands = runner.commands.filter { $0.arguments.contains("-authenticationKeyPath") }
+        let keyPaths = try exportCommands.map { command in
+            let index = try XCTUnwrap(command.arguments.firstIndex(of: "-authenticationKeyPath"))
+            return try XCTUnwrap(command.arguments[safe: index + 1])
+        }
+        XCTAssertEqual(Set(keyPaths).count, 2)
+        XCTAssertTrue(keyPaths.allSatisfy { $0.contains("projpost-upload-") && $0.hasSuffix("/AuthKey_ABC123DEF4.p8") })
     }
 
     func testRunnerThrowsWhenExportProducesNoIPA() async throws {
@@ -196,7 +254,7 @@ private final class SequencedCommandRunner: CommandRunning {
     private var results: [CommandResult]
     private let fileSystem: MemoryFileSystem
     private let exportArtifacts: [String]
-    private var didSeedExportArtifact = false
+    private var seededExportPaths: Set<String> = []
     var commands: [Command] = []
     private(set) var capturedAuthenticationKeyContents: String?
 
@@ -214,11 +272,11 @@ private final class SequencedCommandRunner: CommandRunning {
             let keyPath = URL(fileURLWithPath: command.arguments[keyPathIndex + 1])
             capturedAuthenticationKeyContents = fileSystem.contents[keyPath.path]
         }
-        if !didSeedExportArtifact, let exportPath = exportPath(for: command) {
+        if let exportPath = exportPath(for: command), !seededExportPaths.contains(exportPath.path) {
             for artifact in exportArtifacts {
                 fileSystem.addFile(named: artifact, in: exportPath)
             }
-            didSeedExportArtifact = true
+            seededExportPaths.insert(exportPath.path)
         }
         return results.removeFirst()
     }
@@ -235,6 +293,8 @@ private final class MemoryFileSystem: FileSysteming {
     var written: [URL: Data] = [:]
     var directories: [String: [String]] = [:]
     var contents: [String: String] = [:]
+    var permissions: [URL: Int] = [:]
+    var permissionWrites: [URL: Int] = [:]
 
     func fileExists(_ url: URL) -> Bool {
         written[url] != nil || directories[url.path] != nil
@@ -265,13 +325,28 @@ private final class MemoryFileSystem: FileSysteming {
     }
 
     func removeItem(_ url: URL) throws {
+        if let entries = directories[url.path] {
+            for entry in entries {
+                let child = url.appendingPathComponent(entry)
+                written[child] = nil
+                contents[child.path] = nil
+                permissions[child] = nil
+            }
+            directories[url.path] = nil
+        }
         written[url] = nil
         contents[url.path] = nil
+        permissions[url] = nil
         let parentPath = url.deletingLastPathComponent().path
         directories[parentPath]?.removeAll { $0 == url.lastPathComponent }
         if directories[parentPath]?.isEmpty == true {
             directories[parentPath] = nil
         }
+    }
+
+    func setPOSIXPermissions(_ permissions: Int, for url: URL) throws {
+        self.permissions[url] = permissions
+        permissionWrites[url] = permissions
     }
 
     func addFile(named name: String, in directory: URL) {

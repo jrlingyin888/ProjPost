@@ -7,6 +7,7 @@ public protocol FileSysteming {
     func readData(_ url: URL) throws -> Data
     func writeData(_ data: Data, to url: URL) throws
     func removeItem(_ url: URL) throws
+    func setPOSIXPermissions(_ permissions: Int, for url: URL) throws
 }
 
 public final class LocalFileSystem: FileSysteming {
@@ -36,5 +37,9 @@ public final class LocalFileSystem: FileSysteming {
 
     public func removeItem(_ url: URL) throws {
         try FileManager.default.removeItem(at: url)
+    }
+
+    public func setPOSIXPermissions(_ permissions: Int, for url: URL) throws {
+        try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
     }
 }

@@ -9,8 +9,11 @@
   - 预期输出：构建成功，无关键失败日志
 - [ ] 运行单测：`swift test`
   - 预期输出：所有测试通过（Exit code 0）
-- [ ] 启动应用：`swift run ProjPostApp`
+- [ ] 生成给产品用户使用的 App：`scripts/package_app.sh`
+  - 预期输出：生成 `dist/ProjPost.app`
+- [ ] 产品用户通过 Finder 或 `open dist/ProjPost.app` 打开应用
   - 预期输出：打开 macOS App 窗口（左侧项目列表、右侧项目详情）
+- [ ] 开发者调试时可使用 `swift run ProjPostApp`；这不是产品用户交付路径
 
 ## Apple API Key / Keychain
 - [ ] 在 App 内的 `Apple Account` 区域新增/选择一个账号草稿（Display Name、Key ID、Issuer ID；Team ID 可选）
@@ -29,6 +32,11 @@
   - 预期：`Scheme`、`Bundle ID`、`Version`、`Build`、`Team ID` 等字段被扫描填充
 - [ ] 检查项目卡片 `v版本号 (build)` 与 `statusLabel` 能展示最近上传结果（首次为空时显示“未配置”）
 - [ ] 修改字段后不要保存也能在内存中更新当前项目（并观察 `Run Checks` 提示文案变为“请重新检查”）
+- [ ] 修改 Bundle ID / Version / Build 后确认出现变更摘要和 `Apply Project Changes`
+- [ ] 不点击 `Apply Project Changes` 时运行检查或上传
+  - 预期：检查和上传被阻止，提示先应用项目变更
+- [ ] 点击 `Apply Project Changes`
+  - 预期：先生成备份，再更新 Xcode project，变更摘要清空
 - [ ] 点击 `Save` 持久化后重启 App，再次确认列表/字段恢复成功
 
 ## 配置检查红黄绿
@@ -79,7 +87,7 @@
 - [ ] 在完成验证后手工确认 `swift test` 仍能通过，避免引入本地环境依赖性回归
 
 ## 已知限制 / V1 后续
-- [ ] 项目变更能力（`ProjectMutator`）当前存在于 Core 层，但目前 UI 未暴露“变更摘要 + apply”独立按钮；本轮仅在文档中记录为手工验证后续项
+- [ ] `dist/ProjPost.app` 由开发者/运营人员运行 `scripts/package_app.sh` 产出后交付给产品用户；自动签名、公证、DMG/PKG 安装器属于后续版本范围
 - [ ] 上传阶段为本地打包/上传流程，未内建自动等待 Apple Processing / 自动分发验证 UI
 - [ ] TestFlight 分组、外部 public link 的一键化目前是待自动化目标，不作为 MVP 必达项
 - [ ] App Store 正式提审、组织权限细化、CI 分发流水线、iOS 设备端模拟安装等属于后续版本范围

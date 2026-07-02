@@ -114,6 +114,29 @@ struct ProjectDetailView: View {
                     set: viewModel.updateSelectedProjectConfiguration
                 ))
 
+                if viewModel.hasUnappliedProjectChanges {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Project changes are not applied to disk yet.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        ForEach(viewModel.projectMutationSummary, id: \.self) { summary in
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button {
+                            do {
+                                try viewModel.applyProjectChanges()
+                            } catch {
+                                viewModel.uploadState = .failed(message: "Apply project changes failed: \(error)")
+                            }
+                        } label: {
+                            Label("Apply Project Changes", systemImage: "checkmark.seal")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+
                 HStack {
                     Button {
                         guard let path = viewModel.selectedProject?.projectPath, !path.isEmpty else {
@@ -205,6 +228,7 @@ struct ProjectDetailView: View {
                         Label("Run Checks", systemImage: "checklist")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(viewModel.hasUnappliedProjectChanges)
 
                     Button {
                         if viewModel.hasCurrentYellowChecks {
@@ -218,13 +242,14 @@ struct ProjectDetailView: View {
                         Label("Upload to TestFlight", systemImage: "icloud.and.arrow.up")
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.hasUnappliedProjectChanges)
 
                     Spacer()
                 }
 
-                Text(viewModel.checksAreCurrent ? "Checks are current for this project and Apple account." : "Run checks again after any project, account, or key change.")
+                Text(statusText)
                     .font(.caption)
-                    .foregroundStyle(viewModel.checksAreCurrent ? Color.secondary : Color.orange)
+                    .foregroundStyle(statusColor)
 
                 Divider()
 
@@ -287,6 +312,20 @@ struct ProjectDetailView: View {
         return Label(title, systemImage: systemImage)
             .font(.caption.weight(.medium))
             .foregroundStyle(color)
+    }
+
+    private var statusText: String {
+        if viewModel.hasUnappliedProjectChanges {
+            return "Apply project changes before running checks or uploading."
+        }
+        return viewModel.checksAreCurrent ? "Checks are current for this project and Apple account." : "Run checks again after any project, account, or key change."
+    }
+
+    private var statusColor: Color {
+        if viewModel.hasUnappliedProjectChanges {
+            return .orange
+        }
+        return viewModel.checksAreCurrent ? .secondary : .orange
     }
 
     private func placeholderRow(title: String, value: String) -> some View {

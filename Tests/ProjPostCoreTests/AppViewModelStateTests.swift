@@ -208,8 +208,78 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(viewModel.checkResults.isEmpty)
         XCTAssertEqual(
             viewModel.uploadState,
-            .failed(message: "Run configuration checks for the current project and Apple account before uploading.")
+            .failed(message: "Apply project changes before uploading.")
         )
+        XCTAssertTrue(runner.receivedProjects.isEmpty)
+    }
+
+    func testEditingBuildNumberBlocksChecksUntilProjectChangesAreApplied() async {
+        let project = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
+        let checkEngine = FakeConfigurationCheckEngine()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: checkEngine,
+            uploadRunner: FakeUploadJobRunner(),
+            projectMutator: FakeProjectMutator(),
+            projects: [project]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: nil)
+
+        viewModel.updateSelectedProjectBuildNumber("2")
+        await viewModel.runChecks()
+
+        XCTAssertTrue(viewModel.hasUnappliedProjectChanges)
+        XCTAssertEqual(viewModel.projectMutationSummary, ["Build Number: 1 -> 2"])
+        XCTAssertEqual(checkEngine.runCallCount, 0)
+        XCTAssertEqual(viewModel.uploadState, .failed(message: "Apply project changes before running checks."))
+    }
+
+    func testApplyProjectChangesClearsUnappliedState() async throws {
+        let project = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
+        let mutator = FakeProjectMutator()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projectMutator: mutator,
+            projects: [project]
+        )
+
+        viewModel.updateSelectedProjectBuildNumber("2")
+        try viewModel.applyProjectChanges()
+
+        XCTAssertEqual(mutator.appliedPlans.count, 1)
+        XCTAssertFalse(viewModel.hasUnappliedProjectChanges)
+        XCTAssertTrue(viewModel.projectMutationSummary.isEmpty)
+        XCTAssertEqual(viewModel.selectedProject?.buildNumber, "2")
+    }
+
+    func testUploadCannotProceedWithUnappliedProjectChanges() async {
+        let project = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
+        let runner = FakeUploadJobRunner()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: runner,
+            projectMutator: FakeProjectMutator(),
+            projects: [project]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: nil)
+
+        await viewModel.runChecks()
+        viewModel.updateSelectedProjectBuildNumber("2")
+        await viewModel.startUpload()
+
+        XCTAssertEqual(viewModel.uploadState, .failed(message: "Apply project changes before uploading."))
         XCTAssertTrue(runner.receivedProjects.isEmpty)
     }
 
@@ -470,6 +540,42 @@ private final class FakeUploadJobRunner: UploadJobRunning {
         receivedProjects.append(project)
         receivedAccounts.append(account)
         return events
+    }
+}
+
+private final class FakeProjectMutator: ProjectMutating {
+    private(set) var appliedPlans: [ProjectMutationPlan] = []
+
+    func plan(
+        project: ProjectProfile,
+        targetBundleID: String?,
+        targetVersion: String?,
+        targetBuildNumber: String?,
+        infoPlistURL: URL?
+    ) throws -> ProjectMutationPlan {
+        ProjectMutationPlan(
+            request: ProjectMutationRequest(
+                projectRoot: URL(fileURLWithPath: project.projectPath),
+                pbxprojURL: URL(fileURLWithPath: project.projectPath).appendingPathComponent("\(project.name).xcodeproj/project.pbxproj"),
+                infoPlistURL: infoPlistURL,
+                targetName: project.scheme,
+                currentBundleID: project.bundleID,
+                newBundleID: targetBundleID,
+                currentVersion: project.version,
+                newVersion: targetVersion,
+                currentBuildNumber: project.buildNumber,
+                newBuildNumber: targetBuildNumber
+            ),
+            backupDirectory: URL(fileURLWithPath: project.projectPath).appendingPathComponent(".projpost-backups/test"),
+            filesToBackup: [],
+            changes: [
+                ProjectMutationChange(summary: "Build Number: \(project.buildNumber ?? "-") -> \(targetBuildNumber ?? "-")", oldValue: project.buildNumber, newValue: targetBuildNumber)
+            ].filter { $0.oldValue != $0.newValue }
+        )
+    }
+
+    func apply(_ plan: ProjectMutationPlan) throws {
+        appliedPlans.append(plan)
     }
 }
 

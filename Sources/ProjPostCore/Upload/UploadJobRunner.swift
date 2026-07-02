@@ -49,11 +49,14 @@ public final class UploadJobRunner {
 
     public func runLocalUpload(project: ProjectProfile, account: AppleAccountProfile) async throws -> [UploadEvent] {
         let privateKey = try credentialVault.privateKey(for: account.id)
-        let keyURL = temporaryAuthenticationKeyURL(for: account)
+        let keyDirectory = temporaryAuthenticationKeyDirectory()
+        let keyURL = keyDirectory.appendingPathComponent("AuthKey_\(account.keyID).p8")
 
+        try fileSystem.createDirectory(keyDirectory)
         try fileSystem.writeData(Data(privateKey.utf8), to: keyURL)
+        try fileSystem.setPOSIXPermissions(0o600, for: keyURL)
         defer {
-            try? fileSystem.removeItem(keyURL)
+            try? fileSystem.removeItem(keyDirectory)
         }
 
         return try await runLocalUpload(project: project, account: account, authenticationKeyURL: keyURL)
@@ -108,8 +111,8 @@ public final class UploadJobRunner {
         }
     }
 
-    private func temporaryAuthenticationKeyURL(for account: AppleAccountProfile) -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_\(account.keyID).p8")
+    private func temporaryAuthenticationKeyDirectory() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("projpost-upload-\(UUID().uuidString)", isDirectory: true)
     }
 
     private func discoverExportedIPA(in exportPath: URL) throws -> URL {

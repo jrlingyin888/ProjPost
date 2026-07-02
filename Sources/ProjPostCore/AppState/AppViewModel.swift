@@ -18,10 +18,22 @@ public protocol UploadJobRunning {
     func runLocalUpload(project: ProjectProfile, account: AppleAccountProfile) async throws -> [UploadEvent]
 }
 
+public protocol ProjectMutating {
+    func plan(
+        project: ProjectProfile,
+        targetBundleID: String?,
+        targetVersion: String?,
+        targetBuildNumber: String?,
+        infoPlistURL: URL?
+    ) throws -> ProjectMutationPlan
+    func apply(_ plan: ProjectMutationPlan) throws
+}
+
 extension ProjectProfileStore: ProjectProfileStoreProtocol {}
 extension ProjectScanner: ProjectScanning {}
 extension ConfigurationCheckEngine: ConfigurationCheckEngineProtocol {}
 extension UploadJobRunner: UploadJobRunning {}
+extension ProjectMutator: ProjectMutating {}
 
 public enum PrivateKeyStatus: Equatable {
     case missing
@@ -89,6 +101,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var uploadState: UploadJobState
     @Published public var uploadEvents: [UploadEvent]
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
+    @Published public private(set) var projectMutationSummary: [String]
 
     private let store: ProjectProfileStoreProtocol
     private let accountStore: AppleAccountProfileStoreProtocol
@@ -96,6 +109,8 @@ public final class AppViewModel: ObservableObject {
     private let scanner: ProjectScanning
     private let checkEngine: ConfigurationCheckEngineProtocol
     private let uploadRunner: UploadJobRunning
+    private let projectMutator: ProjectMutating
+    private var appliedProjectSettingsByID: [UUID: AppliedProjectSettings]
     private var lastCheckContext: CheckContext?
 
     public init(
@@ -105,6 +120,7 @@ public final class AppViewModel: ObservableObject {
         scanner: ProjectScanning? = nil,
         checkEngine: ConfigurationCheckEngineProtocol? = nil,
         uploadRunner: UploadJobRunning? = nil,
+        projectMutator: ProjectMutating? = nil,
         projects: [ProjectProfile] = [],
         accountProfiles: [AppleAccountProfile] = [],
         accountDraft: AppleAccountDraft = AppleAccountDraft()
@@ -120,6 +136,7 @@ public final class AppViewModel: ObservableObject {
             commandBuilder: UploadCommandBuilder(),
             credentialVault: credentialVault
         )
+        self.projectMutator = projectMutator ?? ProjectMutator(backupRoot: Self.defaultBackupRoot())
         self.projects = projects
         self.selectedProjectID = projects.first?.id
         self.accountProfiles = accountProfiles
@@ -129,6 +146,8 @@ public final class AppViewModel: ObservableObject {
         self.uploadState = .idle
         self.uploadEvents = []
         self.privateKeyStatus = .missing
+        self.projectMutationSummary = []
+        self.appliedProjectSettingsByID = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, AppliedProjectSettings(project: $0)) })
         self.lastCheckContext = nil
 
         if selectedProject?.selectedAccountID != nil {
@@ -136,6 +155,7 @@ public final class AppViewModel: ObservableObject {
         } else {
             refreshPrivateKeyStatus()
         }
+        refreshProjectMutationState()
     }
 
     public var selectedProject: ProjectProfile? {
@@ -156,12 +176,17 @@ public final class AppViewModel: ObservableObject {
         checksAreCurrent && hasYellowChecks
     }
 
+    public var hasUnappliedProjectChanges: Bool {
+        !projectMutationSummary.isEmpty
+    }
+
     public func loadProjects() throws {
         let loadedProjects = try store.load()
         let loadedAccounts = try accountStore.load()
         let previousSelection = selectedProjectID
         projects = loadedProjects
         accountProfiles = loadedAccounts
+        appliedProjectSettingsByID = Dictionary(uniqueKeysWithValues: loadedProjects.map { ($0.id, AppliedProjectSettings(project: $0)) })
         if let previousSelection, loadedProjects.contains(where: { $0.id == previousSelection }) {
             selectedProjectID = previousSelection
         } else {
@@ -169,6 +194,7 @@ public final class AppViewModel: ObservableObject {
         }
         invalidateChecks()
         hydrateAccountStateFromSelectedProject()
+        refreshProjectMutationState()
     }
 
     public func saveProjects() throws {
@@ -181,13 +207,16 @@ public final class AppViewModel: ObservableObject {
         selectedProjectID = id
         invalidateChecks()
         hydrateAccountStateFromSelectedProject()
+        refreshProjectMutationState()
     }
 
     public func addProject(_ project: ProjectProfile) {
         projects.append(project)
+        appliedProjectSettingsByID[project.id] = AppliedProjectSettings(project: project)
         selectedProjectID = project.id
         invalidateChecks()
         hydrateAccountStateFromSelectedProject()
+        refreshProjectMutationState()
     }
 
     public func addProject(named name: String = "New Project", projectPath: String = "") {
@@ -328,14 +357,24 @@ public final class AppViewModel: ObservableObject {
         let scanResult = try await scanner.scan(projectPath: URL(fileURLWithPath: path))
         let scannedProject = scanResult.toProjectProfile(nameOverride: selectedProject?.name)
         upsertProject(scannedProject)
+        if let selectedProject {
+            appliedProjectSettingsByID[selectedProject.id] = AppliedProjectSettings(project: selectedProject)
+        }
         invalidateChecks()
         hydrateAccountStateFromSelectedProject()
+        refreshProjectMutationState()
     }
 
     public func runChecks() async {
         guard let project = selectedProject else {
             lastCheckContext = nil
             uploadState = .failed(message: "Select a project before running checks.")
+            checkResults = []
+            return
+        }
+        guard !hasUnappliedProjectChanges else {
+            lastCheckContext = nil
+            uploadState = .failed(message: "Apply project changes before running checks.")
             checkResults = []
             return
         }
@@ -369,6 +408,10 @@ public final class AppViewModel: ObservableObject {
             uploadState = .failed(message: "Select or enter an Apple account before uploading.")
             return
         }
+        guard !hasUnappliedProjectChanges else {
+            uploadState = .failed(message: "Apply project changes before uploading.")
+            return
+        }
         guard checksAreCurrent else {
             uploadState = .failed(message: "Run configuration checks for the current project and Apple account before uploading.")
             return
@@ -394,6 +437,32 @@ public final class AppViewModel: ObservableObject {
             uploadState = .failed(message: "Upload failed: \(error)")
             applyLastUploadSummary(success: false, message: "Upload failed: \(error)")
         }
+    }
+
+    public func applyProjectChanges() throws {
+        guard let project = selectedProject else {
+            uploadState = .failed(message: "Select a project before applying project changes.")
+            return
+        }
+        guard hasUnappliedProjectChanges else { return }
+
+        let applied = appliedProjectSettingsByID[project.id] ?? AppliedProjectSettings(project: project)
+        var currentProject = project
+        currentProject.bundleID = applied.bundleID
+        currentProject.version = applied.version
+        currentProject.buildNumber = applied.buildNumber
+
+        let plan = try projectMutator.plan(
+            project: currentProject,
+            targetBundleID: project.bundleID,
+            targetVersion: project.version,
+            targetBuildNumber: project.buildNumber,
+            infoPlistURL: nil
+        )
+        try projectMutator.apply(plan)
+        appliedProjectSettingsByID[project.id] = AppliedProjectSettings(project: project)
+        invalidateChecks()
+        refreshProjectMutationState()
     }
 
     private func upsertProject(_ project: ProjectProfile) {
@@ -425,6 +494,7 @@ public final class AppViewModel: ObservableObject {
         if invalidateChecks {
             self.invalidateChecks()
         }
+        refreshProjectMutationState()
     }
 
     private var currentCheckContext: CheckContext? {
@@ -445,6 +515,25 @@ public final class AppViewModel: ObservableObject {
         checkResults = []
         uploadEvents = []
         uploadState = .idle
+    }
+
+    private func refreshProjectMutationState() {
+        guard let project = selectedProject else {
+            projectMutationSummary = []
+            return
+        }
+
+        let applied = appliedProjectSettingsByID[project.id] ?? AppliedProjectSettings(project: project)
+        var summary: [String] = []
+        appendMutationSummary(&summary, label: "Bundle ID", old: applied.bundleID, new: project.bundleID)
+        appendMutationSummary(&summary, label: "Version", old: applied.version, new: project.version)
+        appendMutationSummary(&summary, label: "Build Number", old: applied.buildNumber, new: project.buildNumber)
+        projectMutationSummary = summary
+    }
+
+    private func appendMutationSummary(_ summary: inout [String], label: String, old: String?, new: String?) {
+        guard old != new else { return }
+        summary.append("\(label): \(old ?? "-") -> \(new ?? "-")")
     }
 
     private func hydrateAccountStateFromSelectedProject() {
@@ -515,6 +604,23 @@ public final class AppViewModel: ObservableObject {
     private static func normalized(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func defaultBackupRoot() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("ProjPost", isDirectory: true).appendingPathComponent("ProjectBackups", isDirectory: true)
+    }
+}
+
+private struct AppliedProjectSettings: Equatable {
+    let bundleID: String?
+    let version: String?
+    let buildNumber: String?
+
+    init(project: ProjectProfile) {
+        self.bundleID = project.bundleID
+        self.version = project.version
+        self.buildNumber = project.buildNumber
     }
 }
 

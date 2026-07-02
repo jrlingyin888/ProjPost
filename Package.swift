@@ -12,14 +12,16 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
-        .package(url: "https://github.com/tuist/XcodeProj.git", from: "8.27.0")
+        .package(url: "https://github.com/tuist/XcodeProj.git", from: "8.27.0"),
+        .package(url: "https://github.com/kylef/PathKit.git", .upToNextMinor(from: "1.0.1"))
     ],
     targets: [
         .target(
             name: "ProjPostCore",
             dependencies: [
                 .product(name: "Crypto", package: "swift-crypto"),
-                .product(name: "XcodeProj", package: "XcodeProj")
+                .product(name: "XcodeProj", package: "XcodeProj"),
+                .product(name: "PathKit", package: "PathKit")
             ]
         ),
         .executableTarget(
@@ -28,7 +30,11 @@ let package = Package(
         ),
         .testTarget(
             name: "ProjPostCoreTests",
-            dependencies: ["ProjPostCore"]
+            dependencies: [
+                "ProjPostCore",
+                .product(name: "XcodeProj", package: "XcodeProj"),
+                .product(name: "PathKit", package: "PathKit")
+            ]
         )
     ]
 )

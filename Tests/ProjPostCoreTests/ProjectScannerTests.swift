@@ -95,4 +95,5 @@ private final class ScannerFileSystem: FileSysteming {
     func readData(_ url: URL) throws -> Data { Data() }
     func writeData(_ data: Data, to url: URL) throws {}
     func removeItem(_ url: URL) throws {}
+    func setPOSIXPermissions(_ permissions: Int, for url: URL) throws {}
 }

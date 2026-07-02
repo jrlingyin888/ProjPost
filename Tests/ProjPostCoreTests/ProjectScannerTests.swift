@@ -22,6 +22,41 @@ final class ProjectScannerTests: XCTestCase {
         XCTAssertEqual(result.buildNumber, "45")
         XCTAssertEqual(result.teamID, "ABCDE12345")
     }
+
+    func testScannerPrefersMatchingTargetBuildSettings() async throws {
+        let runner = FakeCommandRunner(results: [
+            CommandResult(exitCode: 0, stdout: #"{"workspace":{"name":"Demo.xcworkspace","schemes":["Demo"]}}"#, stderr: ""),
+            CommandResult(exitCode: 0, stdout: #"[{"target":"DemoTests","buildSettings":{"PRODUCT_BUNDLE_IDENTIFIER":"com.example.demoTests","MARKETING_VERSION":"9.9.9","CURRENT_PROJECT_VERSION":"999","DEVELOPMENT_TEAM":"TESTTEAM"}},{"target":"Demo","buildSettings":{"PRODUCT_BUNDLE_IDENTIFIER":"com.example.demo","MARKETING_VERSION":"1.2.3","CURRENT_PROJECT_VERSION":"45","DEVELOPMENT_TEAM":"ABCDE12345"}}]"#, stderr: "")
+        ])
+        let scanner = ProjectScanner(commandRunner: runner, fileSystem: ScannerFileSystem(entries: [
+            "/tmp/Demo/Demo.xcworkspace",
+            "/tmp/Demo/Demo.xcodeproj"
+        ]))
+
+        let result = try await scanner.scan(projectPath: URL(fileURLWithPath: "/tmp/Demo"))
+
+        XCTAssertEqual(result.bundleID, "com.example.demo")
+        XCTAssertEqual(result.version, "1.2.3")
+        XCTAssertEqual(result.buildNumber, "45")
+        XCTAssertEqual(result.teamID, "ABCDE12345")
+    }
+
+    func testScannerThrowsWhenProjectSelectorIsMissing() async {
+        let runner = FakeCommandRunner(results: [])
+        let scanner = ProjectScanner(commandRunner: runner, fileSystem: ScannerFileSystem(entries: []))
+        let projectPath = URL(fileURLWithPath: "/tmp/Demo")
+
+        do {
+            _ = try await scanner.scan(projectPath: projectPath)
+            XCTFail("Expected missingXcodeProject error")
+        } catch let ProjectScannerError.missingXcodeProject(url) {
+            XCTAssertEqual(url, projectPath)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertTrue(runner.commands.isEmpty)
+    }
 }
 
 private final class FakeCommandRunner: CommandRunning {

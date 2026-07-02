@@ -65,28 +65,22 @@ public final class ProjectScanner {
     }
 
     private func runXcodebuildList(projectPath: URL, workspace: URL?, projectFile: URL?) async throws -> String {
-        var args = ["-list", "-json"]
-        if let workspace {
-            args += ["-workspace", workspace.path]
-        } else if let projectFile {
-            args += ["-project", projectFile.path]
-        }
-        let result = try await commandRunner.run(Command(executableURL: URL(fileURLWithPath: "/usr/bin/xcodebuild"), arguments: args, workingDirectory: projectPath))
+        let args = try xcodebuildProjectArguments(projectPath: projectPath, workspace: workspace, projectFile: projectFile)
+        var commandArgs = ["-list", "-json"]
+        commandArgs += args
+        let result = try await commandRunner.run(Command(executableURL: URL(fileURLWithPath: "/usr/bin/xcodebuild"), arguments: commandArgs, workingDirectory: projectPath))
         guard result.exitCode == 0 else { throw ProjectScannerError.commandFailed(result.stderr) }
         return result.stdout
     }
 
     private func runBuildSettings(projectPath: URL, workspace: URL?, projectFile: URL?, scheme: String?) async throws -> [String: String] {
         guard let scheme else { return [:] }
-        var args = ["-showBuildSettings", "-json", "-scheme", scheme]
-        if let workspace {
-            args += ["-workspace", workspace.path]
-        } else if let projectFile {
-            args += ["-project", projectFile.path]
-        }
-        let result = try await commandRunner.run(Command(executableURL: URL(fileURLWithPath: "/usr/bin/xcodebuild"), arguments: args, workingDirectory: projectPath))
+        let args = try xcodebuildProjectArguments(projectPath: projectPath, workspace: workspace, projectFile: projectFile)
+        var commandArgs = ["-showBuildSettings", "-json", "-scheme", scheme]
+        commandArgs += args
+        let result = try await commandRunner.run(Command(executableURL: URL(fileURLWithPath: "/usr/bin/xcodebuild"), arguments: commandArgs, workingDirectory: projectPath))
         guard result.exitCode == 0 else { throw ProjectScannerError.commandFailed(result.stderr) }
-        return try parseBuildSettings(from: result.stdout)
+        return try parseBuildSettings(from: result.stdout, matchingTarget: scheme)
     }
 
     private func parseSchemes(from json: String) throws -> [String] {
@@ -97,14 +91,43 @@ public final class ProjectScanner {
         return workspaceSchemes.isEmpty ? projectSchemes : workspaceSchemes
     }
 
-    private func parseBuildSettings(from json: String) throws -> [String: String] {
+    private func parseBuildSettings(from json: String, matchingTarget: String?) throws -> [String: String] {
         let data = Data(json.utf8)
         let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        let settings = array?.first?["buildSettings"] as? [String: Any]
+        let settings = selectBuildSettingsEntry(from: array ?? [], matchingTarget: matchingTarget)?["buildSettings"] as? [String: Any]
         return settings?.compactMapValues { $0 as? String } ?? [:]
+    }
+
+    private func selectBuildSettingsEntry(from entries: [[String: Any]], matchingTarget: String?) -> [String: Any]? {
+        if let matchingTarget, let exactMatch = entries.first(where: { $0["target"] as? String == matchingTarget }) {
+            return exactMatch
+        }
+
+        if let bundleMatch = entries.first(where: { hasNonEmptyBundleIdentifier($0) }) {
+            return bundleMatch
+        }
+
+        return entries.first
+    }
+
+    private func hasNonEmptyBundleIdentifier(_ entry: [String: Any]) -> Bool {
+        guard let buildSettings = entry["buildSettings"] as? [String: Any] else { return false }
+        guard let bundleIdentifier = buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] as? String else { return false }
+        return !bundleIdentifier.isEmpty
+    }
+
+    private func xcodebuildProjectArguments(projectPath: URL, workspace: URL?, projectFile: URL?) throws -> [String] {
+        if let workspace {
+            return ["-workspace", workspace.path]
+        }
+        if let projectFile {
+            return ["-project", projectFile.path]
+        }
+        throw ProjectScannerError.missingXcodeProject(projectPath)
     }
 }
 
 public enum ProjectScannerError: Error, Equatable {
     case commandFailed(String)
+    case missingXcodeProject(URL)
 }

@@ -1,6 +1,31 @@
 import Foundation
 import Security
 
+protocol KeychainClient {
+    func add(_ attributes: [String: Any]) -> OSStatus
+    func update(query: [String: Any], attributesToUpdate: [String: Any]) -> OSStatus
+    func copyMatching(_ query: [String: Any], result: inout AnyObject?) -> OSStatus
+    func delete(_ query: [String: Any]) -> OSStatus
+}
+
+struct SystemKeychainClient: KeychainClient {
+    func add(_ attributes: [String: Any]) -> OSStatus {
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    func update(query: [String: Any], attributesToUpdate: [String: Any]) -> OSStatus {
+        SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
+    }
+
+    func copyMatching(_ query: [String: Any], result: inout AnyObject?) -> OSStatus {
+        SecItemCopyMatching(query as CFDictionary, &result)
+    }
+
+    func delete(_ query: [String: Any]) -> OSStatus {
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
 public protocol CredentialVault {
     func savePrivateKey(_ privateKeyPEM: String, for accountID: UUID) throws
     func privateKey(for accountID: UUID) throws -> String
@@ -14,9 +39,17 @@ public enum CredentialVaultError: Error, Equatable {
 }
 
 public final class KeychainCredentialVault: CredentialVault {
-    private let service = "com.projpost.appstoreconnect"
+    private let service: String
+    private let keychain: KeychainClient
 
-    public init() {}
+    init(service: String, keychain: KeychainClient) {
+        self.service = service
+        self.keychain = keychain
+    }
+
+    public convenience init() {
+        self.init(service: "com.projpost.appstoreconnect", keychain: SystemKeychainClient())
+    }
 
     public func savePrivateKey(_ privateKeyPEM: String, for accountID: UUID) throws {
         let account = accountID.uuidString
@@ -26,14 +59,27 @@ public final class KeychainCredentialVault: CredentialVault {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(query as CFDictionary)
 
         var item = query
         item[kSecValueData as String] = data
         item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
-        let status = SecItemAdd(item as CFDictionary, nil)
-        guard status == errSecSuccess else { throw CredentialVaultError.keychainStatus(status) }
+        let addStatus = keychain.add(item)
+        switch addStatus {
+        case errSecSuccess:
+            return
+        case errSecDuplicateItem:
+            let attributesToUpdate: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
+            let updateStatus = keychain.update(query: query, attributesToUpdate: attributesToUpdate)
+            guard updateStatus == errSecSuccess else {
+                throw CredentialVaultError.keychainStatus(updateStatus)
+            }
+        default:
+            throw CredentialVaultError.keychainStatus(addStatus)
+        }
     }
 
     public func privateKey(for accountID: UUID) throws -> String {
@@ -46,7 +92,7 @@ public final class KeychainCredentialVault: CredentialVault {
         ]
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = keychain.copyMatching(query, result: &result)
         guard status != errSecItemNotFound else { throw CredentialVaultError.itemNotFound }
         guard status == errSecSuccess else { throw CredentialVaultError.keychainStatus(status) }
         guard let data = result as? Data, let text = String(data: data, encoding: .utf8) else {
@@ -63,7 +109,7 @@ public final class KeychainCredentialVault: CredentialVault {
             kSecAttrAccount as String: accountID.uuidString
         ]
 
-        let status = SecItemDelete(query as CFDictionary)
+        let status = keychain.delete(query)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw CredentialVaultError.keychainStatus(status)
         }

@@ -27,4 +27,5 @@ private final class MemoryFileSystem: FileSysteming {
     func createDirectory(_ url: URL) throws {}
     func readData(_ url: URL) throws -> Data { written[url] ?? Data() }
     func writeData(_ data: Data, to url: URL) throws { written[url] = data }
+    func removeItem(_ url: URL) throws { written[url] = nil }
 }

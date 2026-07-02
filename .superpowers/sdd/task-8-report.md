@@ -47,3 +47,35 @@ Results:
 Concerns:
 
 - None at this time.
+
+## Task 8 Credential Vault Fix Report
+
+Findings fixed:
+
+- Added a vault-backed `runLocalUpload(project:account:)` path that loads `account.id` private key material, writes a temporary `AuthKey_*.p8`, passes that file to the export command, and removes it afterward.
+- Kept `runLocalUpload(project:account:keyPath:)` working for the low-level path.
+- Made the default export options writer reuse the runner's injected filesystem instead of constructing a separate local filesystem.
+- Added explicit coverage for missing and ambiguous exported IPA directories.
+
+Files changed:
+
+- `Sources/ProjPostCore/Support/FileSystem.swift`
+- `Sources/ProjPostCore/Upload/UploadJobRunner.swift`
+- `Tests/ProjPostCoreTests/ExportOptionsPlistWriterTests.swift`
+- `Tests/ProjPostCoreTests/ProjectMutatorTests.swift`
+- `Tests/ProjPostCoreTests/ProjectScannerTests.swift`
+- `Tests/ProjPostCoreTests/UploadJobRunnerTests.swift`
+
+Tests run:
+
+- `swift test --filter UploadJobRunnerTests`
+- `swift test`
+
+Results:
+
+- `swift test --filter UploadJobRunnerTests` passed: 4 tests, 0 failures.
+- `swift test` passed: 34 tests, 0 failures.
+
+Concerns:
+
+- Cleanup is best-effort via the filesystem abstraction; the runner removes the temporary key file after completion or failure, but cleanup errors are intentionally not allowed to mask the upload result.

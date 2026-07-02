@@ -6,6 +6,7 @@ public protocol FileSysteming {
     func createDirectory(_ url: URL) throws
     func readData(_ url: URL) throws -> Data
     func writeData(_ data: Data, to url: URL) throws
+    func removeItem(_ url: URL) throws
 }
 
 public final class LocalFileSystem: FileSysteming {
@@ -31,5 +32,9 @@ public final class LocalFileSystem: FileSysteming {
         let parent = url.deletingLastPathComponent()
         try createDirectory(parent)
         try data.write(to: url, options: [.atomic])
+    }
+
+    public func removeItem(_ url: URL) throws {
+        try FileManager.default.removeItem(at: url)
     }
 }

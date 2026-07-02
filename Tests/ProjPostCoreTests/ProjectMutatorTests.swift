@@ -155,4 +155,5 @@ private final class RecordingFileSystem: FileSysteming {
     func createDirectory(_ url: URL) throws {}
     func readData(_ url: URL) throws -> Data { dataByURL[url] ?? Data("PRODUCT_BUNDLE_IDENTIFIER = com.old.demo;".utf8) }
     func writeData(_ data: Data, to url: URL) throws { written[url] = data }
+    func removeItem(_ url: URL) throws {}
 }

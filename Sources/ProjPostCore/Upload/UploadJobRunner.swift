@@ -21,6 +21,7 @@ public enum UploadJobRunnerError: Error, Equatable {
 public final class UploadJobRunner {
     private let commandRunner: CommandRunning
     private let commandBuilder: UploadCommandBuilder
+    private let credentialVault: CredentialVault
     private let exportOptionsWriter: ExportOptionsPlistWriter
     private let fileSystem: FileSysteming
 
@@ -28,15 +29,41 @@ public final class UploadJobRunner {
         commandRunner: CommandRunning,
         commandBuilder: UploadCommandBuilder,
         fileSystem: FileSysteming = LocalFileSystem(),
-        exportOptionsWriter: ExportOptionsPlistWriter = ExportOptionsPlistWriter()
+        credentialVault: CredentialVault = KeychainCredentialVault(),
+        exportOptionsWriter: ExportOptionsPlistWriter? = nil
     ) {
         self.commandRunner = commandRunner
         self.commandBuilder = commandBuilder
-        self.exportOptionsWriter = exportOptionsWriter
         self.fileSystem = fileSystem
+        self.credentialVault = credentialVault
+        self.exportOptionsWriter = exportOptionsWriter ?? ExportOptionsPlistWriter(fileSystem: fileSystem)
     }
 
     public func runLocalUpload(project: ProjectProfile, account: AppleAccountProfile, keyPath: String) async throws -> [UploadEvent] {
+        try await runLocalUpload(
+            project: project,
+            account: account,
+            authenticationKeyURL: URL(fileURLWithPath: keyPath)
+        )
+    }
+
+    public func runLocalUpload(project: ProjectProfile, account: AppleAccountProfile) async throws -> [UploadEvent] {
+        let privateKey = try credentialVault.privateKey(for: account.id)
+        let keyURL = temporaryAuthenticationKeyURL(for: account)
+
+        try fileSystem.writeData(Data(privateKey.utf8), to: keyURL)
+        defer {
+            try? fileSystem.removeItem(keyURL)
+        }
+
+        return try await runLocalUpload(project: project, account: account, authenticationKeyURL: keyURL)
+    }
+
+    private func runLocalUpload(
+        project: ProjectProfile,
+        account: AppleAccountProfile,
+        authenticationKeyURL: URL
+    ) async throws -> [UploadEvent] {
         let buildDir = URL(fileURLWithPath: project.projectPath).appendingPathComponent("build", isDirectory: true)
         let archivePath = buildDir.appendingPathComponent("\(project.name).xcarchive")
         let exportPath = buildDir.appendingPathComponent("export", isDirectory: true)
@@ -54,7 +81,7 @@ public final class UploadJobRunner {
             commandBuilder.exportCommand(
                 project: project,
                 account: account,
-                keyPath: keyPath,
+                keyPath: authenticationKeyURL.path,
                 archivePath: archivePath,
                 exportPath: exportPath,
                 exportOptionsPlist: exportOptionsPlist
@@ -79,6 +106,10 @@ public final class UploadJobRunner {
         guard succeeded else {
             throw UploadJobRunnerError.commandFailed(step: step, message: message)
         }
+    }
+
+    private func temporaryAuthenticationKeyURL(for account: AppleAccountProfile) -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_\(account.keyID).p8")
     }
 
     private func discoverExportedIPA(in exportPath: URL) throws -> URL {

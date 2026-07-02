@@ -94,4 +94,5 @@ private final class ScannerFileSystem: FileSysteming {
     func createDirectory(_ url: URL) throws {}
     func readData(_ url: URL) throws -> Data { Data() }
     func writeData(_ data: Data, to url: URL) throws {}
+    func removeItem(_ url: URL) throws {}
 }

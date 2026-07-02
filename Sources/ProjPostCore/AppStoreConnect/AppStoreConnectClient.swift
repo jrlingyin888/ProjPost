@@ -150,7 +150,12 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
                 ["type": "builds", "id": buildID]
             ]
         ]
-        _ = try await send(method: "POST", path: "/v1/betaGroups/\(betaGroupID)/relationships/builds", query: [:], jsonBody: body)
+        try await sendNoContent(
+            method: "POST",
+            path: "/v1/betaGroups/\(betaGroupID)/relationships/builds",
+            query: [:],
+            jsonBody: body
+        )
     }
 
     public func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup {
@@ -175,6 +180,22 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
 
     private func get(path: String, query: [String: String]) async throws -> [String: Any] {
         try await send(method: "GET", path: path, query: query, jsonBody: nil)
+    }
+
+    private func sendNoContent(method: String, path: String, query: [String: String], jsonBody: Any?) async throws {
+        let token = try jwtProvider()
+        var headers = ["Authorization": "Bearer \(token)"]
+        var bodyData: Data?
+        if let jsonBody {
+            headers["Content-Type"] = "application/json"
+            bodyData = try JSONSerialization.data(withJSONObject: jsonBody, options: [.sortedKeys])
+        }
+
+        let request = ASCRequest(method: method, path: path, queryItems: query, headers: headers, body: bodyData)
+        let response = try await transport.send(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw AppStoreConnectError.badStatus(response.statusCode, response.body)
+        }
     }
 
     private func send(method: String, path: String, query: [String: String], jsonBody: Any?) async throws -> [String: Any] {

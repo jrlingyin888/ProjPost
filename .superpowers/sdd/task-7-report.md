@@ -100,4 +100,16 @@
 - `.superpowers/sdd/task-7-report.md`
 
 ### Commit Created
-- Pending at report append time
+- `2d1756e` (`fix: reject project mutation plans without current values`)
+
+### Finalized Review Fix Report
+- What fixed: `ProjectMutator.plan(request:)` now fails fast when a change is requested but the corresponding current value is `nil`, by throwing `ProjectMutatorError.missingCurrentValue(<label>)` from `appendChange`.
+- Tests run and outputs:
+  - `swift test --filter ProjectMutatorTests`: Passed, 4 tests, 0 failures.
+  - `swift test`: Passed, 28 tests, 0 failures.
+- Files changed:
+  - `Sources/ProjPostCore/Project/ProjectMutator.swift`
+  - `Tests/ProjPostCoreTests/ProjectMutatorTests.swift`
+  - `.superpowers/sdd/task-7-report.md`
+- Commit created:
+  - `2d1756e` (`fix: reject project mutation plans without current values`)

@@ -53,8 +53,7 @@ public final class UploadJobRunner {
         let keyURL = keyDirectory.appendingPathComponent("AuthKey_\(account.keyID).p8")
 
         try fileSystem.createDirectory(keyDirectory)
-        try fileSystem.writeData(Data(privateKey.utf8), to: keyURL)
-        try fileSystem.setPOSIXPermissions(0o600, for: keyURL)
+        try fileSystem.writeSensitiveData(Data(privateKey.utf8), to: keyURL)
         defer {
             try? fileSystem.removeItem(keyDirectory)
         }

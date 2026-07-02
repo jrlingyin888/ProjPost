@@ -1,5 +1,17 @@
 import Foundation
 
+public struct ProjectAppliedSettings: Codable, Equatable {
+    public var bundleID: String?
+    public var version: String?
+    public var buildNumber: String?
+
+    public init(bundleID: String?, version: String?, buildNumber: String?) {
+        self.bundleID = bundleID
+        self.version = version
+        self.buildNumber = buildNumber
+    }
+}
+
 public struct ProjectProfile: Codable, Equatable, Identifiable {
     public var id: UUID
     public var name: String
@@ -14,6 +26,7 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
     public var teamID: String?
     public var selectedAccountID: UUID?
     public var lastUpload: UploadSummary?
+    public var appliedSettings: ProjectAppliedSettings?
 
     public init(
         id: UUID = UUID(),
@@ -28,7 +41,8 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
         buildNumber: String?,
         teamID: String?,
         selectedAccountID: UUID?,
-        lastUpload: UploadSummary?
+        lastUpload: UploadSummary?,
+        appliedSettings: ProjectAppliedSettings? = nil
     ) {
         self.id = id
         self.name = name
@@ -43,6 +57,11 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
         self.teamID = teamID
         self.selectedAccountID = selectedAccountID
         self.lastUpload = lastUpload
+        self.appliedSettings = appliedSettings ?? ProjectAppliedSettings(
+            bundleID: bundleID,
+            version: version,
+            buildNumber: buildNumber
+        )
     }
 
     public var versionDisplay: String {

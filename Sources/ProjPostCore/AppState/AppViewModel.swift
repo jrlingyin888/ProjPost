@@ -147,7 +147,7 @@ public final class AppViewModel: ObservableObject {
         self.uploadEvents = []
         self.privateKeyStatus = .missing
         self.projectMutationSummary = []
-        self.appliedProjectSettingsByID = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, AppliedProjectSettings(project: $0)) })
+        self.appliedProjectSettingsByID = Self.appliedSettingsIndex(for: projects, treatMissingBaselineAsCurrent: true)
         self.lastCheckContext = nil
 
         if selectedProject?.selectedAccountID != nil {
@@ -186,7 +186,7 @@ public final class AppViewModel: ObservableObject {
         let previousSelection = selectedProjectID
         projects = loadedProjects
         accountProfiles = loadedAccounts
-        appliedProjectSettingsByID = Dictionary(uniqueKeysWithValues: loadedProjects.map { ($0.id, AppliedProjectSettings(project: $0)) })
+        appliedProjectSettingsByID = Self.appliedSettingsIndex(for: loadedProjects, treatMissingBaselineAsCurrent: false)
         if let previousSelection, loadedProjects.contains(where: { $0.id == previousSelection }) {
             selectedProjectID = previousSelection
         } else {
@@ -199,7 +199,7 @@ public final class AppViewModel: ObservableObject {
 
     public func saveProjects() throws {
         try accountStore.save(accountProfiles)
-        try store.save(projects)
+        try store.save(persistedProjects())
     }
 
     public func selectProject(_ id: UUID) {
@@ -610,6 +610,31 @@ public final class AppViewModel: ObservableObject {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("ProjPost", isDirectory: true).appendingPathComponent("ProjectBackups", isDirectory: true)
     }
+
+    private func persistedProjects() -> [ProjectProfile] {
+        projects.map { project in
+            var persisted = project
+            persisted.appliedSettings = appliedProjectSettingsByID[project.id]?.persisted
+            return persisted
+        }
+    }
+
+    private static func appliedSettingsIndex(
+        for projects: [ProjectProfile],
+        treatMissingBaselineAsCurrent: Bool
+    ) -> [UUID: AppliedProjectSettings] {
+        Dictionary(uniqueKeysWithValues: projects.map { project in
+            let applied: AppliedProjectSettings
+            if let persisted = project.appliedSettings {
+                applied = AppliedProjectSettings(persisted: persisted)
+            } else if treatMissingBaselineAsCurrent {
+                applied = AppliedProjectSettings(project: project)
+            } else {
+                applied = .unknown
+            }
+            return (project.id, applied)
+        })
+    }
 }
 
 private struct AppliedProjectSettings: Equatable {
@@ -617,10 +642,28 @@ private struct AppliedProjectSettings: Equatable {
     let version: String?
     let buildNumber: String?
 
+    static let unknown = AppliedProjectSettings(bundleID: nil, version: nil, buildNumber: nil)
+
     init(project: ProjectProfile) {
         self.bundleID = project.bundleID
         self.version = project.version
         self.buildNumber = project.buildNumber
+    }
+
+    init(persisted: ProjectAppliedSettings) {
+        self.bundleID = persisted.bundleID
+        self.version = persisted.version
+        self.buildNumber = persisted.buildNumber
+    }
+
+    init(bundleID: String?, version: String?, buildNumber: String?) {
+        self.bundleID = bundleID
+        self.version = version
+        self.buildNumber = buildNumber
+    }
+
+    var persisted: ProjectAppliedSettings {
+        ProjectAppliedSettings(bundleID: bundleID, version: version, buildNumber: buildNumber)
     }
 }
 

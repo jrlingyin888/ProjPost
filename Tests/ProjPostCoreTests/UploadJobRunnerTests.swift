@@ -54,7 +54,8 @@ final class UploadJobRunnerTests: XCTestCase {
         XCTAssertTrue(keyPath.contains("projpost-upload-"))
         XCTAssertTrue(keyPath.hasSuffix("/AuthKey_ABC123DEF4.p8"))
         XCTAssertNotEqual(keyPath, FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_ABC123DEF4.p8").path)
-        XCTAssertEqual(fileSystem.permissionWrites[URL(fileURLWithPath: keyPath)], 0o600)
+        XCTAssertEqual(fileSystem.sensitiveWritePermissions[URL(fileURLWithPath: keyPath)], 0o600)
+        XCTAssertNil(fileSystem.permissionWrites[URL(fileURLWithPath: keyPath)])
         XCTAssertEqual(runner.capturedAuthenticationKeyContents, "-----BEGIN PRIVATE KEY-----\nABC123\n-----END PRIVATE KEY-----")
         XCTAssertFalse(fileSystem.fileExists(URL(fileURLWithPath: keyPath)))
 
@@ -295,6 +296,7 @@ private final class MemoryFileSystem: FileSysteming {
     var contents: [String: String] = [:]
     var permissions: [URL: Int] = [:]
     var permissionWrites: [URL: Int] = [:]
+    var sensitiveWritePermissions: [URL: Int] = [:]
 
     func fileExists(_ url: URL) -> Bool {
         written[url] != nil || directories[url.path] != nil
@@ -322,6 +324,12 @@ private final class MemoryFileSystem: FileSysteming {
             entries.append(fileName)
             directories[parentPath] = entries
         }
+    }
+
+    func writeSensitiveData(_ data: Data, to url: URL) throws {
+        try writeData(data, to: url)
+        permissions[url] = 0o600
+        sensitiveWritePermissions[url] = 0o600
     }
 
     func removeItem(_ url: URL) throws {

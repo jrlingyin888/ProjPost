@@ -6,8 +6,16 @@ public protocol FileSysteming {
     func createDirectory(_ url: URL) throws
     func readData(_ url: URL) throws -> Data
     func writeData(_ data: Data, to url: URL) throws
+    func writeSensitiveData(_ data: Data, to url: URL) throws
     func removeItem(_ url: URL) throws
     func setPOSIXPermissions(_ permissions: Int, for url: URL) throws
+}
+
+public extension FileSysteming {
+    func writeSensitiveData(_ data: Data, to url: URL) throws {
+        try writeData(data, to: url)
+        try setPOSIXPermissions(0o600, for: url)
+    }
 }
 
 public final class LocalFileSystem: FileSysteming {
@@ -33,6 +41,20 @@ public final class LocalFileSystem: FileSysteming {
         let parent = url.deletingLastPathComponent()
         try createDirectory(parent)
         try data.write(to: url, options: [.atomic])
+    }
+
+    public func writeSensitiveData(_ data: Data, to url: URL) throws {
+        let parent = url.deletingLastPathComponent()
+        try createDirectory(parent)
+
+        let created = FileManager.default.createFile(
+            atPath: url.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        )
+        if !created {
+            throw CocoaError(.fileWriteUnknown)
+        }
     }
 
     public func removeItem(_ url: URL) throws {

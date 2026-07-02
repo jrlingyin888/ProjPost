@@ -57,6 +57,7 @@ public enum ProjectMutatorError: Error, Equatable {
     case noChanges
     case missingCurrentValue(String)
     case expectedSettingNotFound(String)
+    case staleSetting(String)
     case targetNotFound
     case ambiguousTarget([String])
 }
@@ -147,6 +148,7 @@ public final class ProjectMutator {
         let xcodeprojURL = plan.request.pbxprojURL.deletingLastPathComponent()
         let project = try XcodeProj(path: Path(xcodeprojURL.path))
         let target = try targetToMutate(in: project, request: plan.request)
+        try validateCurrentSettingsIfNeeded(for: target, request: plan.request)
 
         for configuration in target.buildConfigurationList?.buildConfigurations ?? [] {
             if let new = plan.request.newBundleID {
@@ -242,5 +244,34 @@ public final class ProjectMutator {
     private func settingsMatch(_ settings: [String: Any], key: String, expected: String?) -> Bool {
         guard let expected else { return true }
         return settings[key] as? String == expected
+    }
+
+    private func validateCurrentSettingsIfNeeded(for target: PBXNativeTarget, request: ProjectMutationRequest) throws {
+        guard let targetName = request.targetName?.trimmingCharacters(in: .whitespacesAndNewlines), !targetName.isEmpty else {
+            return
+        }
+
+        try validate(setting: "PRODUCT_BUNDLE_IDENTIFIER", expected: request.currentBundleID, newValue: request.newBundleID, in: target, targetName: targetName)
+        try validate(setting: "MARKETING_VERSION", expected: request.currentVersion, newValue: request.newVersion, in: target, targetName: targetName)
+        try validate(setting: "CURRENT_PROJECT_VERSION", expected: request.currentBuildNumber, newValue: request.newBuildNumber, in: target, targetName: targetName)
+    }
+
+    private func validate(
+        setting key: String,
+        expected: String?,
+        newValue: String?,
+        in target: PBXNativeTarget,
+        targetName: String
+    ) throws {
+        guard let expected, newValue != nil else { return }
+
+        for configuration in target.buildConfigurationList?.buildConfigurations ?? [] {
+            let actual = configuration.buildSettings[key] as? String
+            guard actual == expected else {
+                throw ProjectMutatorError.staleSetting(
+                    "Target \(targetName) has stale \(key) in \(configuration.name): expected \(expected), found \(actual ?? "<missing>")"
+                )
+            }
+        }
     }
 }

@@ -182,6 +182,47 @@ final class ProjectMutatorTests: XCTestCase {
             XCTAssertEqual(names.sorted(), ["AppOne", "AppTwo"])
         }
     }
+
+    func testApplyRejectsNamedTargetWhenCurrentSettingsAreStale() throws {
+        let projectRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let xcodeproj = projectRoot.appendingPathComponent("Demo.xcodeproj")
+        try makeXcodeProject(
+            at: xcodeproj,
+            targets: [
+                targetFixture(name: "Demo", bundleID: "com.old.demo", version: "9.9.9", build: "99")
+            ]
+        )
+        let mutator = ProjectMutator(fileSystem: LocalFileSystem(), backupRoot: projectRoot.appendingPathComponent(".projpost-backups"))
+
+        let request = ProjectMutationRequest(
+            projectRoot: projectRoot,
+            pbxprojURL: xcodeproj.appendingPathComponent("project.pbxproj"),
+            infoPlistURL: nil,
+            targetName: "Demo",
+            currentBundleID: "com.old.demo",
+            newBundleID: "com.example.demo",
+            currentVersion: "1.0.0",
+            newVersion: "1.0.1",
+            currentBuildNumber: "1",
+            newBuildNumber: "2"
+        )
+        let plan = try mutator.plan(request: request)
+
+        XCTAssertThrowsError(try mutator.apply(plan)) { error in
+            guard case ProjectMutatorError.staleSetting(let detail) = error else {
+                return XCTFail("Expected staleSetting, got \(error)")
+            }
+
+            XCTAssertTrue(detail.contains("Demo"))
+            XCTAssertTrue(detail.contains("MARKETING_VERSION"))
+        }
+
+        let unchanged = try XcodeProj(path: Path(xcodeproj.path))
+        let settings = try XCTUnwrap(settings(in: unchanged, targetName: "Demo"))
+        XCTAssertEqual(settings["PRODUCT_BUNDLE_IDENTIFIER"] as? String, "com.old.demo")
+        XCTAssertEqual(settings["MARKETING_VERSION"] as? String, "9.9.9")
+        XCTAssertEqual(settings["CURRENT_PROJECT_VERSION"] as? String, "99")
+    }
 }
 
 private func targetFixture(name: String, bundleID: String, version: String, build: String) -> (String, [String: String]) {

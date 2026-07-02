@@ -283,6 +283,52 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(runner.receivedProjects.isEmpty)
     }
 
+    func testSavedProjectEditsStayUnappliedAfterReloadUntilApplyOrScan() async throws {
+        let store = FakeProjectProfileStore()
+        let runner = FakeUploadJobRunner()
+        let originalProject = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
+        let firstViewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: runner,
+            projectMutator: FakeProjectMutator(),
+            projects: [originalProject]
+        )
+
+        firstViewModel.updateSelectedProjectBuildNumber("2")
+        try firstViewModel.saveProjects()
+
+        let reloadedRunner = FakeUploadJobRunner()
+        let reloadedChecks = FakeConfigurationCheckEngine()
+        let reloadedViewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: reloadedChecks,
+            uploadRunner: reloadedRunner,
+            projectMutator: FakeProjectMutator()
+        )
+
+        try reloadedViewModel.loadProjects()
+        reloadedViewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: nil)
+
+        XCTAssertEqual(reloadedViewModel.selectedProject?.buildNumber, "2")
+        XCTAssertTrue(reloadedViewModel.hasUnappliedProjectChanges)
+        XCTAssertEqual(reloadedViewModel.projectMutationSummary, ["Build Number: 1 -> 2"])
+
+        await reloadedViewModel.runChecks()
+        XCTAssertEqual(reloadedChecks.runCallCount, 0)
+        XCTAssertEqual(reloadedViewModel.uploadState, .failed(message: "Apply project changes before running checks."))
+
+        await reloadedViewModel.startUpload()
+        XCTAssertEqual(reloadedViewModel.uploadState, .failed(message: "Apply project changes before uploading."))
+        XCTAssertTrue(reloadedRunner.receivedProjects.isEmpty)
+    }
+
     func testAccountEditsInvalidateChecksAndBlockUploadUntilChecksRerun() async {
         let runner = FakeUploadJobRunner()
         let checkEngine = FakeConfigurationCheckEngine()
@@ -484,6 +530,7 @@ private final class FakeProjectProfileStore: ProjectProfileStoreProtocol {
 
     func save(_ profiles: [ProjectProfile]) throws {
         savedProfiles = profiles
+        loadResult = profiles
     }
 }
 

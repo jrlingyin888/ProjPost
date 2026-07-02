@@ -61,3 +61,24 @@
 
 ### Commit Created
 - `feat: plan and backup project mutations`
+
+### Review Fix Report
+- Fixed `ProjectMutator.apply(_:)` so each requested replacement now verifies that the expected old setting text exists before writing the `.pbxproj`.
+- Added `ProjectMutatorError.expectedSettingNotFound(String)` and made bundle ID, version, and build number substitutions throw when the old setting string is missing.
+- Added a regression test that feeds a Bundle ID change plan with `.pbxproj` text missing `PRODUCT_BUNDLE_IDENTIFIER = com.old.demo;`, then verifies `apply(_:)` throws and does not write the mutated project file.
+
+### Tests Run
+- `swift test --filter ProjectMutatorTests`
+  - Passed: 3 tests, 0 failures
+- `swift test`
+  - Passed: 27 tests, 0 failures
+
+### Files Changed
+- `Sources/ProjPostCore/Project/ProjectMutator.swift`
+- `Tests/ProjPostCoreTests/ProjectMutatorTests.swift`
+
+### Commit Created
+- `feat: guard project mutation replacements`
+
+### Notes
+- `ProjectMutatorError.noChanges` behavior was left unchanged because the task brief explicitly mandates it as an error for no-change requests.

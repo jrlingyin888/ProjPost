@@ -65,19 +65,56 @@ final class ProjectMutatorTests: XCTestCase {
         XCTAssertTrue(firstPlan.backupDirectory.lastPathComponent.hasPrefix("202"))
         XCTAssertTrue(secondPlan.backupDirectory.lastPathComponent.hasPrefix("202"))
     }
+
+    func testApplyThrowsWhenExpectedBundleIDSettingIsMissing() throws {
+        let projectRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let pbxproj = projectRoot.appendingPathComponent("Demo.xcodeproj/project.pbxproj")
+        let fileSystem = RecordingFileSystem(
+            existingFiles: [pbxproj.path],
+            dataByURL: [
+                pbxproj: Data("MARKETING_VERSION = 1.0.0;\nCURRENT_PROJECT_VERSION = 1;".utf8)
+            ]
+        )
+        let mutator = ProjectMutator(fileSystem: fileSystem, backupRoot: projectRoot.appendingPathComponent(".projpost-backups"))
+
+        let request = ProjectMutationRequest(
+            projectRoot: projectRoot,
+            pbxprojURL: pbxproj,
+            infoPlistURL: nil,
+            currentBundleID: "com.old.demo",
+            newBundleID: "com.example.demo",
+            currentVersion: "1.0.0",
+            newVersion: "1.0.1",
+            currentBuildNumber: "1",
+            newBuildNumber: "2"
+        )
+
+        let plan = try mutator.plan(request: request)
+
+        XCTAssertThrowsError(try mutator.apply(plan)) { error in
+            guard case ProjectMutatorError.expectedSettingNotFound(let setting) = error else {
+                return XCTFail("Expected expectedSettingNotFound, got \(error)")
+            }
+
+            XCTAssertEqual(setting, "PRODUCT_BUNDLE_IDENTIFIER = com.old.demo;")
+        }
+        XCTAssertNil(fileSystem.written[pbxproj])
+    }
 }
 
 private final class RecordingFileSystem: FileSysteming {
     let existingFiles: Set<String>
+    let dataByURL: [URL: Data]
     var written: [URL: Data] = [:]
 
-    init(existingFiles: [String]) {
+    init(existingFiles: [String], dataByURL: [URL: Data] = [:]) {
         self.existingFiles = Set(existingFiles)
+        self.dataByURL = dataByURL
     }
 
     func fileExists(_ url: URL) -> Bool { existingFiles.contains(url.path) }
     func contentsOfDirectory(_ url: URL) throws -> [String] { [] }
     func createDirectory(_ url: URL) throws {}
-    func readData(_ url: URL) throws -> Data { Data("PRODUCT_BUNDLE_IDENTIFIER = com.old.demo;".utf8) }
+    func readData(_ url: URL) throws -> Data { dataByURL[url] ?? Data("PRODUCT_BUNDLE_IDENTIFIER = com.old.demo;".utf8) }
     func writeData(_ data: Data, to url: URL) throws { written[url] = data }
 }

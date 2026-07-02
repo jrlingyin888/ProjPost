@@ -50,6 +50,7 @@ public struct ProjectMutationPlan: Equatable {
 public enum ProjectMutatorError: Error, Equatable {
     case missingPbxproj(URL)
     case noChanges
+    case expectedSettingNotFound(String)
 }
 
 public final class ProjectMutator {
@@ -138,22 +139,25 @@ public final class ProjectMutator {
         var pbxText = String(data: pbxData, encoding: .utf8) ?? ""
 
         if let old = plan.request.currentBundleID, let new = plan.request.newBundleID, old != new {
-            pbxText = pbxText.replacingOccurrences(
-                of: "PRODUCT_BUNDLE_IDENTIFIER = \(old);",
+            pbxText = try replacingSetting(
+                "PRODUCT_BUNDLE_IDENTIFIER = \(old);",
+                in: pbxText,
                 with: "PRODUCT_BUNDLE_IDENTIFIER = \(new);"
             )
         }
 
         if let old = plan.request.currentVersion, let new = plan.request.newVersion, old != new {
-            pbxText = pbxText.replacingOccurrences(
-                of: "MARKETING_VERSION = \(old);",
+            pbxText = try replacingSetting(
+                "MARKETING_VERSION = \(old);",
+                in: pbxText,
                 with: "MARKETING_VERSION = \(new);"
             )
         }
 
         if let old = plan.request.currentBuildNumber, let new = plan.request.newBuildNumber, old != new {
-            pbxText = pbxText.replacingOccurrences(
-                of: "CURRENT_PROJECT_VERSION = \(old);",
+            pbxText = try replacingSetting(
+                "CURRENT_PROJECT_VERSION = \(old);",
+                in: pbxText,
                 with: "CURRENT_PROJECT_VERSION = \(new);"
             )
         }
@@ -184,6 +188,14 @@ public final class ProjectMutator {
                 newValue: new
             )
         )
+    }
+
+    private func replacingSetting(_ oldValue: String, in text: String, with newValue: String) throws -> String {
+        guard text.contains(oldValue) else {
+            throw ProjectMutatorError.expectedSettingNotFound(oldValue)
+        }
+
+        return text.replacingOccurrences(of: oldValue, with: newValue)
     }
 
     private func resolvePBXProjURL(project: ProjectProfile, projectRoot: URL) -> URL {

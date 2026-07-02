@@ -47,3 +47,45 @@
 ## Concerns
 
 - The new UI captures Apple account metadata, but this task did not add a `.p8` import/save flow into `CredentialVault`. Live checks/uploads from a fresh session still depend on a matching key already existing in the vault.
+
+## Task 9 Fix Report
+
+### Findings Fixed
+
+- Gated uploads on configuration checks that match the current selected project/account/private-key snapshot, so empty or stale `checkResults` no longer allow upload attempts.
+- Invalidated checks and upload readiness on project edits, account draft edits, account selection changes, account saves, and `.p8` imports while preserving yellow-confirmation behavior for current checks.
+- Added `AppleAccountProfileStore` JSON persistence for non-secret Apple account metadata and hydrated per-project selected accounts on load/select without overwriting `selectedAccountID` during ordinary project edits.
+- Injected `CredentialVault` into `AppViewModel`, added `importPrivateKey(from:)` / `importPrivateKeyPEM(_:)`, and wired a real macOS `.p8` file importer that stores raw key material only in Keychain while surfacing saved/missing/failed status.
+- Reworked the left pane into selectable project cards, cleared both add-project draft fields after add, and added internal/public TestFlight placeholder rows in the upload section.
+- Added regression coverage for missing/stale checks, selected-account persistence, vault-backed `.p8` import, and the new account profile store.
+
+### Files Changed
+
+- `Sources/ProjPostCore/AppState/AppViewModel.swift`
+- `Sources/ProjPostCore/Storage/AppleAccountProfileStore.swift`
+- `Sources/ProjPostApp/Views/ProjectDetailView.swift`
+- `Sources/ProjPostApp/Views/ProjectListView.swift`
+- `Tests/ProjPostCoreTests/AppViewModelStateTests.swift`
+- `Tests/ProjPostCoreTests/AppleAccountProfileStoreTests.swift`
+
+### Verification
+
+1. `swift test --filter AppViewModelStateTests`
+   - Result: PASS
+   - Executed 16 tests, 0 failures
+
+2. `swift test --filter AppleAccountProfileStoreTests`
+   - Result: PASS
+   - Executed 2 tests, 0 failures
+
+3. `swift test`
+   - Result: PASS
+   - Executed 52 tests, 0 failures
+
+4. `swift build`
+   - Result: PASS
+   - Build complete
+
+### Concerns
+
+- None.

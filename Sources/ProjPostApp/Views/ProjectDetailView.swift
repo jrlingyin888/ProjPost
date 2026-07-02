@@ -1,9 +1,11 @@
 import ProjPostCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ProjectDetailView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var showYellowConfirmation = false
+    @State private var showPrivateKeyImporter = false
 
     var body: some View {
         ScrollView {
@@ -26,6 +28,18 @@ struct ProjectDetailView: View {
             }
         } message: {
             Text("Configuration checks returned warnings that need explicit confirmation before upload.")
+        }
+        .fileImporter(
+            isPresented: $showPrivateKeyImporter,
+            allowedContentTypes: [UTType(filenameExtension: "p8") ?? .data, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case let .success(urls) = result, let url = urls.first else { return }
+            do {
+                try viewModel.importPrivateKey(from: url)
+            } catch {
+                // AppViewModel already translates failures into non-secret UI state.
+            }
         }
     }
 
@@ -128,6 +142,15 @@ struct ProjectDetailView: View {
     private var accountFields: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
+                Picker("Saved Account", selection: accountSelectionBinding) {
+                    Text("None")
+                        .tag(Optional<UUID>.none)
+                    ForEach(viewModel.accountProfiles) { profile in
+                        Text(profile.displayName)
+                            .tag(Optional(profile.id))
+                    }
+                }
+
                 editableRow("Account", text: Binding(
                     get: { viewModel.accountDraft.displayName },
                     set: { updateAccount(displayName: $0) }
@@ -144,6 +167,26 @@ struct ProjectDetailView: View {
                     get: { viewModel.accountDraft.teamID },
                     set: { updateAccount(teamID: $0) }
                 ))
+
+                HStack(spacing: 12) {
+                    Button {
+                        viewModel.saveAccountProfile()
+                    } label: {
+                        Label("Save Account", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        showPrivateKeyImporter = true
+                    } label: {
+                        Label("Import .p8", systemImage: "key.horizontal")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.accountDraft.isComplete)
+
+                    Spacer()
+                    privateKeyStatusBadge
+                }
             }
         } label: {
             Label("Apple Account", systemImage: "person.crop.square")
@@ -152,30 +195,43 @@ struct ProjectDetailView: View {
 
     private var uploadActions: some View {
         GroupBox {
-            HStack {
-                Button {
-                    Task {
-                        await viewModel.runChecks()
-                    }
-                } label: {
-                    Label("Run Checks", systemImage: "checklist")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    if viewModel.hasYellowChecks {
-                        showYellowConfirmation = true
-                    } else {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button {
                         Task {
-                            await viewModel.startUpload()
+                            await viewModel.runChecks()
                         }
+                    } label: {
+                        Label("Run Checks", systemImage: "checklist")
                     }
-                } label: {
-                    Label("Upload to TestFlight", systemImage: "icloud.and.arrow.up")
-                }
-                .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
 
-                Spacer()
+                    Button {
+                        if viewModel.hasCurrentYellowChecks {
+                            showYellowConfirmation = true
+                        } else {
+                            Task {
+                                await viewModel.startUpload()
+                            }
+                        }
+                    } label: {
+                        Label("Upload to TestFlight", systemImage: "icloud.and.arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Spacer()
+                }
+
+                Text(viewModel.checksAreCurrent ? "Checks are current for this project and Apple account." : "Run checks again after any project, account, or key change.")
+                    .font(.caption)
+                    .foregroundStyle(viewModel.checksAreCurrent ? Color.secondary : Color.orange)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    placeholderRow(title: "Internal testers", value: "Available after the next successful upload")
+                    placeholderRow(title: "Public TestFlight link", value: "Create a public link after Apple finishes processing")
+                }
             }
         } label: {
             Label("TestFlight Upload", systemImage: "paperplane")
@@ -199,5 +255,47 @@ struct ProjectDetailView: View {
             issuerID: issuerID ?? viewModel.accountDraft.issuerID,
             teamID: teamID ?? viewModel.accountDraft.teamID
         )
+    }
+
+    private var accountSelectionBinding: Binding<UUID?> {
+        Binding(
+            get: { viewModel.selectedProject?.selectedAccountID },
+            set: { viewModel.selectAccountProfile($0) }
+        )
+    }
+
+    private var privateKeyStatusBadge: some View {
+        let title: String
+        let systemImage: String
+        let color: Color
+
+        switch viewModel.privateKeyStatus {
+        case .missing:
+            title = "Key Missing"
+            systemImage = "exclamationmark.circle"
+            color = .orange
+        case .saved:
+            title = "Key Saved"
+            systemImage = "checkmark.circle.fill"
+            color = .green
+        case .failed:
+            title = "Key Failed"
+            systemImage = "xmark.octagon.fill"
+            color = .red
+        }
+
+        return Label(title, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(color)
+    }
+
+    private func placeholderRow(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout)
+        }
     }
 }

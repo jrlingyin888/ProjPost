@@ -61,6 +61,46 @@ public final class ProjectMutator {
         self.backupRoot = backupRoot
     }
 
+    public func request(
+        from project: ProjectProfile,
+        targetBundleID: String?,
+        targetVersion: String?,
+        targetBuildNumber: String?,
+        infoPlistURL: URL?
+    ) throws -> ProjectMutationRequest {
+        let projectRoot = URL(fileURLWithPath: project.projectPath)
+        let pbxprojURL = resolvePBXProjURL(project: project, projectRoot: projectRoot)
+
+        return ProjectMutationRequest(
+            projectRoot: projectRoot,
+            pbxprojURL: pbxprojURL,
+            infoPlistURL: infoPlistURL,
+            currentBundleID: project.bundleID,
+            newBundleID: targetBundleID,
+            currentVersion: project.version,
+            newVersion: targetVersion,
+            currentBuildNumber: project.buildNumber,
+            newBuildNumber: targetBuildNumber
+        )
+    }
+
+    public func plan(
+        project: ProjectProfile,
+        targetBundleID: String?,
+        targetVersion: String?,
+        targetBuildNumber: String?,
+        infoPlistURL: URL?
+    ) throws -> ProjectMutationPlan {
+        let request = try request(
+            from: project,
+            targetBundleID: targetBundleID,
+            targetVersion: targetVersion,
+            targetBuildNumber: targetBuildNumber,
+            infoPlistURL: infoPlistURL
+        )
+        return try plan(request: request)
+    }
+
     public func plan(request: ProjectMutationRequest) throws -> ProjectMutationPlan {
         guard fileSystem.fileExists(request.pbxprojURL) else {
             throw ProjectMutatorError.missingPbxproj(request.pbxprojURL)
@@ -80,8 +120,7 @@ public final class ProjectMutator {
             files.append(infoPlistURL)
         }
 
-        let formatter = ISO8601DateFormatter()
-        let folderName = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let folderName = backupFolderName()
         let backupDirectory = backupRoot.appendingPathComponent(folderName, isDirectory: true)
 
         return ProjectMutationPlan(
@@ -145,5 +184,19 @@ public final class ProjectMutator {
                 newValue: new
             )
         )
+    }
+
+    private func resolvePBXProjURL(project: ProjectProfile, projectRoot: URL) -> URL {
+        if let projectFilePath = project.projectFilePath {
+            return URL(fileURLWithPath: projectFilePath).appendingPathComponent("project.pbxproj")
+        }
+
+        return projectRoot.appendingPathComponent("\(project.name).xcodeproj/project.pbxproj")
+    }
+
+    private func backupFolderName() -> String {
+        let formatter = ISO8601DateFormatter()
+        let timestamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        return "\(timestamp)-\(UUID().uuidString)"
     }
 }

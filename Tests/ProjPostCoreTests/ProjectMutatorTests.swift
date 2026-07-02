@@ -2,17 +2,54 @@ import XCTest
 @testable import ProjPostCore
 
 final class ProjectMutatorTests: XCTestCase {
-    func testPlanIncludesBackupAndReadableSummary() throws {
+    func testPlanFromProjectProfileIncludesBackupAndReadableSummary() throws {
         let projectRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         let pbxproj = projectRoot.appendingPathComponent("Demo.xcodeproj/project.pbxproj")
         let info = projectRoot.appendingPathComponent("Demo/Info.plist")
         let fileSystem = RecordingFileSystem(existingFiles: [pbxproj.path, info.path])
         let mutator = ProjectMutator(fileSystem: fileSystem, backupRoot: projectRoot.appendingPathComponent(".projpost-backups"))
 
+        let project = ProjectProfile(
+            name: "Demo",
+            projectPath: projectRoot.path,
+            workspacePath: nil,
+            projectFilePath: projectRoot.appendingPathComponent("Demo.xcodeproj").path,
+            scheme: "Demo",
+            configuration: "Release",
+            bundleID: "com.old.demo",
+            version: "1.0.0",
+            buildNumber: "1",
+            teamID: nil,
+            selectedAccountID: nil,
+            lastUpload: nil
+        )
+
+        let plan = try mutator.plan(
+            project: project,
+            targetBundleID: "com.example.demo",
+            targetVersion: "1.0.1",
+            targetBuildNumber: "2",
+            infoPlistURL: info
+        )
+
+        XCTAssertEqual(plan.changes.map(\.summary), [
+            "Bundle ID: com.old.demo -> com.example.demo",
+            "Version: 1.0.0 -> 1.0.1",
+            "Build Number: 1 -> 2"
+        ])
+        XCTAssertEqual(plan.filesToBackup, [pbxproj, info])
+    }
+
+    func testPlansCreatedBackToBackUseDistinctBackupDirectories() throws {
+        let projectRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let pbxproj = projectRoot.appendingPathComponent("Demo.xcodeproj/project.pbxproj")
+        let fileSystem = RecordingFileSystem(existingFiles: [pbxproj.path])
+        let mutator = ProjectMutator(fileSystem: fileSystem, backupRoot: projectRoot.appendingPathComponent(".projpost-backups"))
+
         let request = ProjectMutationRequest(
             projectRoot: projectRoot,
             pbxprojURL: pbxproj,
-            infoPlistURL: info,
+            infoPlistURL: nil,
             currentBundleID: "com.old.demo",
             newBundleID: "com.example.demo",
             currentVersion: "1.0.0",
@@ -21,14 +58,12 @@ final class ProjectMutatorTests: XCTestCase {
             newBuildNumber: "2"
         )
 
-        let plan = try mutator.plan(request: request)
+        let firstPlan = try mutator.plan(request: request)
+        let secondPlan = try mutator.plan(request: request)
 
-        XCTAssertEqual(plan.changes.map(\.summary), [
-            "Bundle ID: com.old.demo -> com.example.demo",
-            "Version: 1.0.0 -> 1.0.1",
-            "Build Number: 1 -> 2"
-        ])
-        XCTAssertEqual(plan.filesToBackup, [pbxproj, info])
+        XCTAssertNotEqual(firstPlan.backupDirectory, secondPlan.backupDirectory)
+        XCTAssertTrue(firstPlan.backupDirectory.lastPathComponent.hasPrefix("202"))
+        XCTAssertTrue(secondPlan.backupDirectory.lastPathComponent.hasPrefix("202"))
     }
 }
 

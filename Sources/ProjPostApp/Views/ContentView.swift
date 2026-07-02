@@ -1,13 +1,15 @@
+import ProjPostCore
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var viewModel = AppViewModel()
+
     var body: some View {
         NavigationSplitView {
-            Text("项目列表")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ProjectListView(viewModel: viewModel)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 340)
         } detail: {
-            Text("选择或添加项目")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ProjectDetailView(viewModel: viewModel)
         }
     }
 }

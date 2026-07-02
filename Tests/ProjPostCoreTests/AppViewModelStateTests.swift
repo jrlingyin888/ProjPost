@@ -237,6 +237,70 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.uploadState, .failed(message: "Apply project changes before running checks."))
     }
 
+    func testClearingBundleIDAllowsChecksToSurfaceMissingFieldErrors() async {
+        let project = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
+        let results = [
+            CheckResult(id: "bundle-id", title: "Missing Bundle ID", message: "Bundle ID is required.", severity: .red)
+        ]
+        let checkEngine = FakeConfigurationCheckEngine(results: results)
+        let runner = FakeUploadJobRunner()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: checkEngine,
+            uploadRunner: runner,
+            projects: [project]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: nil)
+        viewModel.updateSelectedProjectBundleID("")
+
+        XCTAssertFalse(viewModel.hasUnappliedProjectChanges)
+        XCTAssertTrue(viewModel.projectMutationSummary.isEmpty)
+
+        await viewModel.runChecks()
+        await viewModel.startUpload()
+
+        XCTAssertEqual(checkEngine.runCallCount, 1)
+        XCTAssertEqual(checkEngine.lastProject?.bundleID, nil)
+        XCTAssertEqual(viewModel.checkResults, results)
+        XCTAssertEqual(viewModel.uploadState, .failed(message: "Upload blocked by configuration issues. Resolve red checks before uploading."))
+        XCTAssertTrue(runner.receivedProjects.isEmpty)
+    }
+
+    func testClearingBuildNumberAllowsChecksToSurfaceMissingFieldErrors() async {
+        let project = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
+        let results = [
+            CheckResult(id: "build-number", title: "Missing Build Number", message: "Build number is required.", severity: .red)
+        ]
+        let checkEngine = FakeConfigurationCheckEngine(results: results)
+        let runner = FakeUploadJobRunner()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: checkEngine,
+            uploadRunner: runner,
+            projects: [project]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: nil)
+        viewModel.updateSelectedProjectBuildNumber("   ")
+
+        XCTAssertFalse(viewModel.hasUnappliedProjectChanges)
+        XCTAssertTrue(viewModel.projectMutationSummary.isEmpty)
+
+        await viewModel.runChecks()
+        await viewModel.startUpload()
+
+        XCTAssertEqual(checkEngine.runCallCount, 1)
+        XCTAssertEqual(checkEngine.lastProject?.buildNumber, nil)
+        XCTAssertEqual(viewModel.checkResults, results)
+        XCTAssertEqual(viewModel.uploadState, .failed(message: "Upload blocked by configuration issues. Resolve red checks before uploading."))
+        XCTAssertTrue(runner.receivedProjects.isEmpty)
+    }
+
     func testApplyProjectChangesClearsUnappliedState() async throws {
         let project = makeProject(name: "Demo", version: "1.0", buildNumber: "1")
         let mutator = FakeProjectMutator()

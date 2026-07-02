@@ -532,8 +532,9 @@ public final class AppViewModel: ObservableObject {
     }
 
     private func appendMutationSummary(_ summary: inout [String], label: String, old: String?, new: String?) {
+        guard let new else { return }
         guard old != new else { return }
-        summary.append("\(label): \(old ?? "-") -> \(new ?? "-")")
+        summary.append("\(label): \(old ?? "-") -> \(new)")
     }
 
     private func hydrateAccountStateFromSelectedProject() {

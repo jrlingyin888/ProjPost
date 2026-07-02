@@ -20,3 +20,30 @@ Verification:
 - `swift test`
 
 All tests passed.
+
+## Task 8 Fix Report
+
+Findings fixed:
+
+- Discovered the exported IPA from the export directory instead of assuming `<project.name>.ipa`.
+- Wrote export options with `project.teamID ?? account.teamID` so account team fallback is preserved.
+- Switched command failure messages to prefer stderr and include stdout context when present.
+
+Files changed:
+
+- `Sources/ProjPostCore/Upload/UploadJobRunner.swift`
+- `Tests/ProjPostCoreTests/UploadJobRunnerTests.swift`
+
+Tests run:
+
+- `swift test --filter UploadJobRunnerTests`
+- `swift test`
+
+Results:
+
+- `swift test --filter UploadJobRunnerTests` passed: 2 tests, 0 failures.
+- `swift test` passed: 32 tests, 0 failures.
+
+Concerns:
+
+- None at this time.

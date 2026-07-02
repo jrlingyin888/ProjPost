@@ -50,6 +50,7 @@ public struct ProjectMutationPlan: Equatable {
 public enum ProjectMutatorError: Error, Equatable {
     case missingPbxproj(URL)
     case noChanges
+    case missingCurrentValue(String)
     case expectedSettingNotFound(String)
 }
 
@@ -108,9 +109,9 @@ public final class ProjectMutator {
         }
 
         var changes: [ProjectMutationChange] = []
-        appendChange(&changes, label: "Bundle ID", old: request.currentBundleID, new: request.newBundleID)
-        appendChange(&changes, label: "Version", old: request.currentVersion, new: request.newVersion)
-        appendChange(&changes, label: "Build Number", old: request.currentBuildNumber, new: request.newBuildNumber)
+        try appendChange(&changes, label: "Bundle ID", old: request.currentBundleID, new: request.newBundleID)
+        try appendChange(&changes, label: "Version", old: request.currentVersion, new: request.newVersion)
+        try appendChange(&changes, label: "Build Number", old: request.currentBuildNumber, new: request.newBuildNumber)
 
         guard !changes.isEmpty else {
             throw ProjectMutatorError.noChanges
@@ -179,11 +180,15 @@ public final class ProjectMutator {
         try fileSystem.writeData(Data(summary.utf8), to: plan.backupDirectory.appendingPathComponent("changes.txt"))
     }
 
-    private func appendChange(_ changes: inout [ProjectMutationChange], label: String, old: String?, new: String?) {
-        guard let new, old != new else { return }
+    private func appendChange(_ changes: inout [ProjectMutationChange], label: String, old: String?, new: String?) throws {
+        guard let new else { return }
+        guard let old else {
+            throw ProjectMutatorError.missingCurrentValue(label)
+        }
+        guard old != new else { return }
         changes.append(
             ProjectMutationChange(
-                summary: "\(label): \(old ?? "-") -> \(new)",
+                summary: "\(label): \(old) -> \(new)",
                 oldValue: old,
                 newValue: new
             )

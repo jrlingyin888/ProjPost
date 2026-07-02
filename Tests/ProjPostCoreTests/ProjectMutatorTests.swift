@@ -40,6 +40,44 @@ final class ProjectMutatorTests: XCTestCase {
         XCTAssertEqual(plan.filesToBackup, [pbxproj, info])
     }
 
+    func testPlanThrowsWhenTargetVersionExistsButCurrentVersionIsMissing() throws {
+        let projectRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+        let pbxproj = projectRoot.appendingPathComponent("Demo.xcodeproj/project.pbxproj")
+        let fileSystem = RecordingFileSystem(existingFiles: [pbxproj.path])
+        let mutator = ProjectMutator(fileSystem: fileSystem, backupRoot: projectRoot.appendingPathComponent(".projpost-backups"))
+
+        let project = ProjectProfile(
+            name: "Demo",
+            projectPath: projectRoot.path,
+            workspacePath: nil,
+            projectFilePath: projectRoot.appendingPathComponent("Demo.xcodeproj").path,
+            scheme: "Demo",
+            configuration: "Release",
+            bundleID: "com.old.demo",
+            version: nil,
+            buildNumber: "1",
+            teamID: nil,
+            selectedAccountID: nil,
+            lastUpload: nil
+        )
+
+        XCTAssertThrowsError(
+            try mutator.plan(
+                project: project,
+                targetBundleID: nil,
+                targetVersion: "1.0.1",
+                targetBuildNumber: nil,
+                infoPlistURL: nil
+            )
+        ) { error in
+            guard case ProjectMutatorError.missingCurrentValue(let label) = error else {
+                return XCTFail("Expected missingCurrentValue, got \(error)")
+            }
+
+            XCTAssertEqual(label, "Version")
+        }
+    }
+
     func testPlansCreatedBackToBackUseDistinctBackupDirectories() throws {
         let projectRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
         let pbxproj = projectRoot.appendingPathComponent("Demo.xcodeproj/project.pbxproj")

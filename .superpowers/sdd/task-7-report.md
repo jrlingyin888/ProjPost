@@ -82,3 +82,22 @@
 
 ### Notes
 - `ProjectMutatorError.noChanges` behavior was left unchanged because the task brief explicitly mandates it as an error for no-change requests.
+
+### Review Fix Report
+- Fixed the planning path so a requested mutation now fails fast when the current project value is missing instead of producing an unapplyable change.
+- Added `ProjectMutatorError.missingCurrentValue(String)` and made `appendChange` throw for `nil` current values whenever a target value is present.
+- Added a regression test that uses a `ProjectProfile` with `version == nil` and `targetVersion` set, then verifies planning throws `missingCurrentValue("Version")`.
+
+### Tests Run
+- `swift test --filter ProjectMutatorTests`
+  - Passed: 4 tests, 0 failures
+- `swift test`
+  - Passed: 28 tests, 0 failures
+
+### Files Changed
+- `Sources/ProjPostCore/Project/ProjectMutator.swift`
+- `Tests/ProjPostCoreTests/ProjectMutatorTests.swift`
+- `.superpowers/sdd/task-7-report.md`
+
+### Commit Created
+- Pending at report append time

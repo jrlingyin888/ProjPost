@@ -82,6 +82,7 @@ public protocol AppStoreConnectClientProtocol {
     func fetchBuilds(appID: String, appVersion: String?, buildNumber: String?) async throws -> [ASCBuild]
     func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup]
     func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild]
+    func fetchBetaReviewSubmission(buildID: String) async throws -> ASCBetaReviewSubmission?
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws
     func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup
     func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission
@@ -164,6 +165,21 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
     public func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild] {
         let json = try await get(path: "/v1/betaGroups/\(betaGroupID)/builds", query: [:])
         return try dataArray(from: json).map(Self.mapBuild)
+    }
+
+    public func fetchBetaReviewSubmission(buildID: String) async throws -> ASCBetaReviewSubmission? {
+        do {
+            let json = try await get(path: "/v1/builds/\(buildID)/betaAppReviewSubmission", query: [:])
+            guard let data = json["data"] as? [String: Any] else {
+                throw AppStoreConnectError.malformedResponse
+            }
+            return Self.mapBetaReviewSubmission(data)
+        } catch let error as AppStoreConnectError {
+            if case .badStatus(404, _) = error {
+                return nil
+            }
+            throw error
+        }
     }
 
     public func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {

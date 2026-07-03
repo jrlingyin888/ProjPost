@@ -245,6 +245,46 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.betaReviewState, .succeeded(message: "TestFlight status: Waiting for Review"))
     }
 
+    func testRefreshLatestBuildTestFlightStatusReadsBetaReviewSubmissionWhenBuildOmitsState() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: nil)],
+            betaReviewSubmissionsByBuildID: [
+                "build-123": ASCBetaReviewSubmission(id: "submission-123", betaReviewState: "WAITING_FOR_REVIEW")
+            ]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshLatestBuildTestFlightStatus()
+
+        XCTAssertEqual(appStoreConnect.fetchBetaReviewSubmissionBuildIDs, ["build-123"])
+        XCTAssertEqual(viewModel.betaReviewState, .succeeded(message: "TestFlight status: Waiting for Review"))
+        guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
+            return XCTFail("Expected loaded distribution snapshot")
+        }
+        XCTAssertEqual(snapshot.betaReviewState, "WAITING_FOR_REVIEW")
+        XCTAssertEqual(snapshot.betaReviewStateText, "Waiting for Review")
+    }
+
     func testRefreshLatestBuildTestFlightStatusDoesNotRequireLastUploadSuccess() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
@@ -1275,12 +1315,14 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var builds: [ASCBuild]
     var betaGroups: [ASCBetaGroup]
     var buildsByBetaGroupID: [String: [ASCBuild]]
+    var betaReviewSubmissionsByBuildID: [String: ASCBetaReviewSubmission]
     var submission: ASCBetaReviewSubmission
     var addBuildFailuresByGroupID: [String: Error] = [:]
     var enablePublicLinkFailuresByGroupID: [String: Error] = [:]
     private(set) var fetchAppBundleIDs: [String] = []
     private(set) var fetchBuildRequests: [FetchBuildRequest] = []
     private(set) var fetchBuildsForBetaGroupIDs: [String] = []
+    private(set) var fetchBetaReviewSubmissionBuildIDs: [String] = []
     private(set) var addedBuildsToGroups: [(buildID: String, betaGroupID: String)] = []
     private(set) var enabledPublicLinks: [(betaGroupID: String, limit: Int?)] = []
     private(set) var submittedBuildIDs: [String] = []
@@ -1291,6 +1333,7 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         builds: [ASCBuild] = [],
         betaGroups: [ASCBetaGroup] = [],
         buildsByBetaGroupID: [String: [ASCBuild]] = [:],
+        betaReviewSubmissionsByBuildID: [String: ASCBetaReviewSubmission] = [:],
         submission: ASCBetaReviewSubmission = ASCBetaReviewSubmission(id: "submission", betaReviewState: nil)
     ) {
         self.app = app
@@ -1298,6 +1341,7 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         self.builds = builds
         self.betaGroups = betaGroups
         self.buildsByBetaGroupID = buildsByBetaGroupID
+        self.betaReviewSubmissionsByBuildID = betaReviewSubmissionsByBuildID
         self.submission = submission
     }
 
@@ -1322,6 +1366,11 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild] {
         fetchBuildsForBetaGroupIDs.append(betaGroupID)
         return buildsByBetaGroupID[betaGroupID] ?? []
+    }
+
+    func fetchBetaReviewSubmission(buildID: String) async throws -> ASCBetaReviewSubmission? {
+        fetchBetaReviewSubmissionBuildIDs.append(buildID)
+        return betaReviewSubmissionsByBuildID[buildID]
     }
 
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {

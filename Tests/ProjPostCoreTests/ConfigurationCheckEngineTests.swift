@@ -142,6 +142,7 @@ private final class FakeASCClient: AppStoreConnectClientProtocol {
     }
     func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup] { [] }
     func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild] { [] }
+    func fetchBetaReviewSubmission(buildID: String) async throws -> ASCBetaReviewSubmission? { nil }
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {}
     func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup {
         ASCBetaGroup(id: betaGroupID, name: "外部公开测试", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/abc", publicLinkLimit: limit)

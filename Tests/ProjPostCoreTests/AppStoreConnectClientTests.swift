@@ -49,6 +49,25 @@ final class AppStoreConnectClientTests: XCTestCase {
         XCTAssertEqual(transport.requests.first?.path, "/v1/betaGroups/group-123/builds")
     }
 
+    func testFetchBetaReviewSubmissionForBuildMapsReviewState() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":{"id":"submission-123","type":"betaAppReviewSubmissions","attributes":{"betaReviewState":"WAITING_FOR_REVIEW"}}}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let submission = try await client.fetchBetaReviewSubmission(buildID: "build-123")
+
+        XCTAssertEqual(submission, ASCBetaReviewSubmission(id: "submission-123", betaReviewState: "WAITING_FOR_REVIEW"))
+        XCTAssertEqual(transport.requests.count, 1)
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/v1/builds/build-123/betaAppReviewSubmission")
+        XCTAssertEqual(request.headers["Authorization"], "Bearer token")
+    }
+
     func testFetchBuildsFiltersByAppVersionAndBuildNumber() async throws {
         let transport = StubASCTransport(responses: [
             ASCTransportResponse(statusCode: 200, body: #"{"data":[{"id":"build1","type":"builds","attributes":{"version":"1","processingState":"VALID","betaReviewState":"WAITING_FOR_REVIEW"}}]}"#)

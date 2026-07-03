@@ -971,6 +971,7 @@ public final class AppViewModel: ObservableObject {
         guard let build = try await client.fetchBuilds(appID: app.id, appVersion: version, buildNumber: buildNumber).first else {
             throw TestFlightDistributionError.buildNotFound(version: version, buildNumber: buildNumber)
         }
+        let betaReviewSubmission = try await client.fetchBetaReviewSubmission(buildID: build.id)
 
         let allGroups = try await client.fetchBetaGroups(appID: app.id)
         var associatedIDs = Set<String>()
@@ -983,7 +984,8 @@ public final class AppViewModel: ObservableObject {
         let groups = allGroups.map { Self.distributionGroup(from: $0, associatedGroupIDs: associatedIDs) }
         let internalGroups = groups.filter(\.isInternalGroup).sorted { $0.name < $1.name }
         let externalGroups = groups.filter { !$0.isInternalGroup }.sorted { $0.name < $1.name }
-        let reviewStateText = Self.readableBetaReviewState(build.betaReviewState) ?? "Not Submitted"
+        let betaReviewState = betaReviewSubmission?.betaReviewState ?? build.betaReviewState
+        let reviewStateText = Self.readableBetaReviewState(betaReviewState) ?? "Not Submitted"
 
         return (
             TestFlightDistributionSnapshot(
@@ -992,7 +994,7 @@ public final class AppViewModel: ObservableObject {
                 version: version,
                 buildNumber: buildNumber,
                 processingState: build.processingState,
-                betaReviewState: build.betaReviewState,
+                betaReviewState: betaReviewState,
                 betaReviewStateText: reviewStateText,
                 internalGroups: internalGroups,
                 externalGroups: externalGroups

@@ -59,6 +59,29 @@ final class CredentialVaultTests: XCTestCase {
 
         XCTAssertEqual(privateKey, "stored-key")
         XCTAssertEqual(client.calls, [.copyMatching])
+        XCTAssertEqual(client.lastCopyMatchingQuery?[kSecReturnData as String] as? Bool, true)
+    }
+
+    func testPrivateKeyExistsChecksAttributesWithoutReturningSecretData() throws {
+        let client = FakeKeychainClient()
+        client.items[accountID.uuidString] = .utf8("stored-key")
+        let vault = KeychainCredentialVault(service: "test.service", keychain: client)
+
+        let exists = try vault.privateKeyExists(for: accountID)
+
+        XCTAssertTrue(exists)
+        XCTAssertEqual(client.calls, [.copyMatching])
+        XCTAssertNil(client.lastCopyMatchingQuery?[kSecReturnData as String])
+        XCTAssertEqual(client.lastCopyMatchingQuery?[kSecReturnAttributes as String] as? Bool, true)
+    }
+
+    func testPrivateKeyExistsReturnsFalseWhenItemIsMissing() throws {
+        let client = FakeKeychainClient()
+        let vault = KeychainCredentialVault(service: "test.service", keychain: client)
+
+        let exists = try vault.privateKeyExists(for: accountID)
+
+        XCTAssertFalse(exists)
     }
 
     func testPrivateKeyThrowsItemNotFound() throws {
@@ -150,6 +173,7 @@ private final class FakeKeychainClient: KeychainClient {
     var lastAddedAttributes: [String: Any]?
     var lastUpdateQuery: [String: Any]?
     var lastUpdatedAttributes: [String: Any]?
+    var lastCopyMatchingQuery: [String: Any]?
 
     func add(_ attributes: [String: Any]) -> OSStatus {
         calls.append(.add)
@@ -193,6 +217,7 @@ private final class FakeKeychainClient: KeychainClient {
 
     func copyMatching(_ query: [String: Any], result: inout AnyObject?) -> OSStatus {
         calls.append(.copyMatching)
+        lastCopyMatchingQuery = query
 
         guard copyMatchingStatus == errSecSuccess else {
             return copyMatchingStatus
@@ -203,7 +228,14 @@ private final class FakeKeychainClient: KeychainClient {
             return errSecItemNotFound
         }
 
-        result = value.data as AnyObject
+        if query[kSecReturnData as String] as? Bool == true {
+            result = value.data as AnyObject
+        } else if query[kSecReturnAttributes as String] as? Bool == true {
+            result = [
+                kSecAttrAccount as String: account,
+                kSecAttrService as String: query[kSecAttrService as String] as? String ?? ""
+            ] as CFDictionary
+        }
         return errSecSuccess
     }
 

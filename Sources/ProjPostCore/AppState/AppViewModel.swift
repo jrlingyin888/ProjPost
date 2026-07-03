@@ -1090,10 +1090,7 @@ public final class AppViewModel: ObservableObject {
         }
 
         do {
-            _ = try credentialVault.privateKey(for: accountID)
-            privateKeyStatus = .saved
-        } catch CredentialVaultError.itemNotFound {
-            privateKeyStatus = .missing
+            privateKeyStatus = try credentialVault.privateKeyExists(for: accountID) ? .saved : .missing
         } catch {
             privateKeyStatus = .failed
         }

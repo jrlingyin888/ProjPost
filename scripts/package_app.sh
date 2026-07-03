@@ -13,6 +13,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 RESOURCE_BUNDLE_NAME="ProjPost_ProjPostApp.bundle"
 ICON_SOURCE="$ROOT_DIR/Sources/ProjPostApp/Resources/AppIcon.icns"
+SIGN_IDENTITY="${SIGN_IDENTITY:-${CODESIGN_IDENTITY:-}}"
 
 cd "$ROOT_DIR"
 swift build -c "$CONFIGURATION" --product "$EXECUTABLE_NAME"
@@ -62,5 +63,23 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+if [ -z "$SIGN_IDENTITY" ] && [ "${DISABLE_AUTO_SIGN:-0}" != "1" ]; then
+    SIGN_IDENTITY="$(
+        security find-identity -v -p codesigning 2>/dev/null \
+            | awk -F '"' '/Developer ID Application|Apple Distribution|Apple Development/ { print $2; exit }'
+    )"
+fi
+
+if [ -n "$SIGN_IDENTITY" ]; then
+    echo "Signing $APP_DIR with $SIGN_IDENTITY"
+    if ! codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"; then
+        echo "Warning: signing with $SIGN_IDENTITY failed; falling back to ad-hoc signing." >&2
+        codesign --force --deep --sign - "$APP_DIR"
+    fi
+else
+    echo "Signing $APP_DIR with ad-hoc identity"
+    codesign --force --deep --sign - "$APP_DIR"
+fi
 
 echo "Packaged $APP_DIR"

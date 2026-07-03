@@ -19,10 +19,5 @@ struct ContentView: View {
                 viewModel.uploadState = .failed(message: "Failed to load saved projects: \(error)")
             }
         }
-        .task(id: viewModel.latestBuildStatusTrigger) {
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            guard !Task.isCancelled else { return }
-            await viewModel.refreshLatestBuildTestFlightStatusIfNeeded()
-        }
     }
 }

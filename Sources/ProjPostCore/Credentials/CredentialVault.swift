@@ -28,6 +28,7 @@ struct SystemKeychainClient: KeychainClient {
 
 public protocol CredentialVault {
     func savePrivateKey(_ privateKeyPEM: String, for accountID: UUID) throws
+    func privateKeyExists(for accountID: UUID) throws -> Bool
     func privateKey(for accountID: UUID) throws -> String
     func deletePrivateKey(for accountID: UUID) throws
 }
@@ -36,6 +37,17 @@ public enum CredentialVaultError: Error, Equatable {
     case itemNotFound
     case invalidData
     case keychainStatus(OSStatus)
+}
+
+public extension CredentialVault {
+    func privateKeyExists(for accountID: UUID) throws -> Bool {
+        do {
+            _ = try privateKey(for: accountID)
+            return true
+        } catch CredentialVaultError.itemNotFound {
+            return false
+        }
+    }
 }
 
 public final class KeychainCredentialVault: CredentialVault {
@@ -80,6 +92,24 @@ public final class KeychainCredentialVault: CredentialVault {
         default:
             throw CredentialVaultError.keychainStatus(addStatus)
         }
+    }
+
+    public func privateKeyExists(for accountID: UUID) throws -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountID.uuidString,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = keychain.copyMatching(query, result: &result)
+        if status == errSecItemNotFound {
+            return false
+        }
+        guard status == errSecSuccess else { throw CredentialVaultError.keychainStatus(status) }
+        return true
     }
 
     public func privateKey(for accountID: UUID) throws -> String {

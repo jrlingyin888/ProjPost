@@ -715,16 +715,55 @@ public final class AppViewModel: ObservableObject {
         do {
             let loaded = try await loadLatestBuildDistribution(project: project, account: account)
             let snapshot = loaded.snapshot
-            if let processingState = snapshot.processingState, processingState != "VALID" {
+            var finalSnapshot = snapshot
+            var linkFailureCount = 0
+            if project.autoLinkExternalGroupsAfterBetaApproval,
+               snapshot.betaReviewState == "APPROVED",
+               !snapshot.externalGroups.isEmpty {
+                testFlightDistributionState = .linking(snapshot)
+                let result = await linkExternalGroups(snapshot: snapshot, client: loaded.client)
+                finalSnapshot = result.snapshot
+                linkFailureCount = result.failureCount
+            }
+
+            if linkFailureCount > 0 {
+                betaReviewState = .failed(message: "Linked external groups with \(linkFailureCount) failure.")
+            } else if let processingState = snapshot.processingState, processingState != "VALID" {
                 betaReviewState = .succeeded(message: "TestFlight status: \(snapshot.betaReviewStateText). Build processing: \(processingState)")
             } else {
                 betaReviewState = .succeeded(message: "TestFlight status: \(snapshot.betaReviewStateText)")
             }
-            testFlightDistributionState = .loaded(snapshot)
+            testFlightDistributionState = .loaded(finalSnapshot)
         } catch {
             let message = Self.testFlightDistributionErrorMessage(error)
             betaReviewState = .failed(message: message)
             testFlightDistributionState = .failed(message: message)
+        }
+    }
+
+    public func linkExternalGroupsForLatestBuild() async {
+        guard !isOperationRunning else { return }
+        guard let project = selectedProject else {
+            testFlightDistributionState = .failed(message: "Select a project before linking external groups.")
+            return
+        }
+        guard let account = accountProfile else {
+            testFlightDistributionState = .failed(message: "Select an Apple account before linking external groups.")
+            return
+        }
+
+        testFlightDistributionState = .linking(currentDistributionSnapshot)
+        do {
+            let loaded = try await loadLatestBuildDistribution(project: project, account: account)
+            let linkedSnapshot = await linkExternalGroups(snapshot: loaded.snapshot, client: loaded.client)
+            testFlightDistributionState = .loaded(linkedSnapshot.snapshot)
+            betaReviewState = linkedSnapshot.failureCount == 0
+                ? .succeeded(message: "External TestFlight groups linked.")
+                : .failed(message: "Linked external groups with \(linkedSnapshot.failureCount) failure.")
+        } catch {
+            let message = Self.testFlightDistributionErrorMessage(error)
+            testFlightDistributionState = .failed(message: message)
+            betaReviewState = .failed(message: message)
         }
     }
 
@@ -869,6 +908,50 @@ public final class AppViewModel: ObservableObject {
             publicLink: group.publicLink,
             publicLinkLimit: group.publicLinkLimit
         )
+    }
+
+    private var currentDistributionSnapshot: TestFlightDistributionSnapshot? {
+        switch testFlightDistributionState {
+        case .loaded(let snapshot):
+            return snapshot
+        case .linking(let snapshot):
+            return snapshot
+        default:
+            return nil
+        }
+    }
+
+    private func linkExternalGroups(
+        snapshot: TestFlightDistributionSnapshot,
+        client: AppStoreConnectClientProtocol
+    ) async -> (snapshot: TestFlightDistributionSnapshot, failureCount: Int) {
+        var updated = snapshot
+        var failureCount = 0
+        var linkedGroups: [TestFlightDistributionGroup] = []
+
+        for group in snapshot.externalGroups {
+            var updatedGroup = group
+            do {
+                if !group.isCurrentBuildAssociated {
+                    try await client.addBuild(snapshot.buildID, toBetaGroup: group.id)
+                    updatedGroup.isCurrentBuildAssociated = true
+                }
+                if !group.publicLinkEnabled {
+                    let enabled = try await client.enablePublicLink(betaGroupID: group.id, limit: group.publicLinkLimit)
+                    updatedGroup.publicLinkEnabled = enabled.publicLinkEnabled
+                    updatedGroup.publicLink = enabled.publicLink
+                    updatedGroup.publicLinkLimit = enabled.publicLinkLimit
+                }
+                updatedGroup.operationState = .linked
+            } catch {
+                failureCount += 1
+                updatedGroup.operationState = .failed(message: "\(error)")
+            }
+            linkedGroups.append(updatedGroup)
+        }
+
+        updated.externalGroups = linkedGroups
+        return (updated, failureCount)
     }
 
     private func loadLatestBuildDistribution(

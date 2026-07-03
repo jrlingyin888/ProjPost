@@ -327,6 +327,177 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(snapshot.externalGroups.first?.publicLink, "https://testflight.apple.com/join/a")
     }
 
+    func testApprovedBuildAutoLinksExternalGroupsAndEnablesPublicLinks() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let allGroups = [
+            ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
+            ASCBetaGroup(id: "external-a", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: 100),
+            ASCBetaGroup(id: "external-b", name: "外部测试 B", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/b", publicLinkLimit: nil)
+        ]
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
+            betaGroups: allGroups,
+            associatedBetaGroups: [allGroups[2]]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshLatestBuildTestFlightStatus()
+
+        XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external-a"])
+        XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external-a"])
+        guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
+            return XCTFail("Expected loaded snapshot after automation")
+        }
+        XCTAssertEqual(snapshot.externalGroups.map(\.isCurrentBuildAssociated), [true, true])
+        XCTAssertEqual(snapshot.externalGroups.map(\.publicLinkEnabled), [true, true])
+    }
+
+    func testApprovedBuildDoesNotAutoLinkWhenAutomationDisabled() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.autoLinkExternalGroupsAfterBetaApproval = false
+        let external = ASCBetaGroup(id: "external", name: "外部测试", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
+            betaGroups: [external],
+            associatedBetaGroups: []
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshLatestBuildTestFlightStatus()
+
+        XCTAssertTrue(appStoreConnect.addedBuildsToGroups.isEmpty)
+        XCTAssertTrue(appStoreConnect.enabledPublicLinks.isEmpty)
+        guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
+            return XCTFail("Expected loaded snapshot")
+        }
+        XCTAssertEqual(snapshot.externalGroups.first?.isCurrentBuildAssociated, false)
+    }
+
+    func testManualLinkExternalGroupsLinksAllExternalGroupsOnly() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.autoLinkExternalGroupsAfterBetaApproval = false
+        let internalGroup = ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
+        let externalGroup = ASCBetaGroup(id: "external", name: "外部测试", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
+            betaGroups: [internalGroup, externalGroup],
+            associatedBetaGroups: []
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.linkExternalGroupsForLatestBuild()
+
+        XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external"])
+        XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external"])
+    }
+
+    func testManualLinkExternalGroupsCapturesPartialFailures() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.autoLinkExternalGroupsAfterBetaApproval = false
+        let groups = [
+            ASCBetaGroup(id: "external-a", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
+            ASCBetaGroup(id: "external-b", name: "外部测试 B", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
+        ]
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
+            betaGroups: groups,
+            associatedBetaGroups: []
+        )
+        appStoreConnect.enablePublicLinkFailuresByGroupID = ["external-b": TestError.unavailable]
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.linkExternalGroupsForLatestBuild()
+
+        XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external-a", "external-b"])
+        XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external-a", "external-b"])
+        guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
+            return XCTFail("Expected loaded snapshot")
+        }
+        XCTAssertEqual(snapshot.externalGroups.first(where: { $0.id == "external-a" })?.operationState, .linked)
+        if case let .failed(message) = snapshot.externalGroups.first(where: { $0.id == "external-b" })?.operationState {
+            XCTAssertTrue(message.contains("unavailable"))
+        } else {
+            XCTFail("Expected failed operation state for external-b")
+        }
+        XCTAssertEqual(viewModel.betaReviewState, .failed(message: "Linked external groups with 1 failure."))
+    }
+
     func testAutomaticChecksRunOnceWhenReady() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
@@ -1100,9 +1271,13 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var betaGroups: [ASCBetaGroup]
     var associatedBetaGroups: [ASCBetaGroup]
     var submission: ASCBetaReviewSubmission
+    var addBuildFailuresByGroupID: [String: Error] = [:]
+    var enablePublicLinkFailuresByGroupID: [String: Error] = [:]
     private(set) var fetchAppBundleIDs: [String] = []
     private(set) var fetchBuildRequests: [FetchBuildRequest] = []
     private(set) var fetchBetaGroupsForBuildIDs: [String] = []
+    private(set) var addedBuildsToGroups: [(buildID: String, betaGroupID: String)] = []
+    private(set) var enabledPublicLinks: [(betaGroupID: String, limit: Int?)] = []
     private(set) var submittedBuildIDs: [String] = []
 
     init(
@@ -1144,10 +1319,26 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         return associatedBetaGroups
     }
 
-    func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {}
+    func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {
+        addedBuildsToGroups.append((buildID, betaGroupID))
+        if let error = addBuildFailuresByGroupID[betaGroupID] {
+            throw error
+        }
+    }
 
     func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup {
-        ASCBetaGroup(id: betaGroupID, name: "External", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/abc", publicLinkLimit: limit)
+        enabledPublicLinks.append((betaGroupID, limit))
+        if let error = enablePublicLinkFailuresByGroupID[betaGroupID] {
+            throw error
+        }
+        return ASCBetaGroup(
+            id: betaGroupID,
+            name: betaGroups.first(where: { $0.id == betaGroupID })?.name ?? "External",
+            isInternalGroup: false,
+            publicLinkEnabled: true,
+            publicLink: "https://testflight.apple.com/join/\(betaGroupID)",
+            publicLinkLimit: limit
+        )
     }
 
     func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission {

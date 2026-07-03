@@ -17,6 +17,11 @@ public struct XcodeEnvironmentChecker: EnvironmentChecking {
             guard result.exitCode == 0 else {
                 return CheckResult(id: "xcode", title: "Xcode 不可用", message: result.stderr.isEmpty ? "请安装或选择 Xcode" : result.stderr, severity: .red)
             }
+            let rsyncResult = try await commandRunner.run(Command(executableURL: URL(fileURLWithPath: "/usr/bin/env"), arguments: ["rsync", "--version"]))
+            guard rsyncResult.exitCode == 0 else {
+                let message = rsyncResult.stderr.isEmpty ? "xcodebuild exportArchive 需要 rsync，请确认 /usr/bin 在 PATH 中" : rsyncResult.stderr
+                return CheckResult(id: "rsync", title: "rsync 不可用", message: message, severity: .red)
+            }
             return CheckResult(id: "xcode", title: "Xcode 可用", message: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines), severity: .green)
         } catch {
             return CheckResult(id: "xcode", title: "Xcode 不可用", message: "请安装 Xcode 并确认命令行工具可用", severity: .red)
@@ -64,10 +69,13 @@ public final class ConfigurationCheckEngine {
             }
 
             if let buildNumber = project.buildNumber, !buildNumber.isEmpty {
-                let builds = try await appStoreConnect.fetchBuilds(appID: app.id, buildNumber: buildNumber)
+                let trimmedVersion = project.version?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let appVersion = trimmedVersion?.isEmpty == false ? trimmedVersion : nil
+                let builds = try await appStoreConnect.fetchBuilds(appID: app.id, appVersion: appVersion, buildNumber: buildNumber)
+                let buildLabel = appVersion.map { "\($0) (\(buildNumber))" } ?? "build \(buildNumber)"
                 results.append(builds.isEmpty
-                    ? CheckResult(id: "build-number", title: "Build Number 可用", message: buildNumber, severity: .green)
-                    : CheckResult(id: "build-number", title: "Build Number 可能重复", message: "App Store Connect 已存在 build \(buildNumber)，请递增后再上传", severity: .red)
+                    ? CheckResult(id: "build-number", title: "Build Number 可用", message: buildLabel, severity: .green)
+                    : CheckResult(id: "build-number", title: "Build Number 可能重复", message: "App Store Connect 已存在 \(buildLabel)，请递增后再上传", severity: .red)
                 )
             } else {
                 results.append(CheckResult(id: "build-number", title: "Build Number 缺失", message: "请填写 Build Number", severity: .red))

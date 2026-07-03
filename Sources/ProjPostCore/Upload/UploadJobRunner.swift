@@ -19,6 +19,8 @@ public enum UploadJobRunnerError: Error, Equatable {
 }
 
 public final class UploadJobRunner {
+    private static let maxCommandOutputCharacters = 4_800
+
     private let commandRunner: CommandRunning
     private let commandBuilder: UploadCommandBuilder
     private let credentialVault: CredentialVault
@@ -92,7 +94,13 @@ public final class UploadJobRunner {
         try append(result: exportResult, step: .exportIPA, to: &events)
 
         let ipaPath = try discoverExportedIPA(in: exportPath)
-        let uploadResult = try await commandRunner.run(commandBuilder.uploadCommand(ipaPath: ipaPath, account: account))
+        let uploadResult = try await commandRunner.run(
+            commandBuilder.uploadCommand(
+                ipaPath: ipaPath,
+                account: account,
+                privateKeysDirectory: authenticationKeyURL.deletingLastPathComponent()
+            )
+        )
         try append(result: uploadResult, step: .upload, to: &events)
 
         return events
@@ -100,7 +108,7 @@ public final class UploadJobRunner {
 
     private func append(result: CommandResult, step: UploadStep, to events: inout [UploadEvent]) throws {
         let output = result.stderr.isEmpty ? result.stdout : [result.stderr, result.stdout.isEmpty ? nil : "stdout:\n\(result.stdout)"].compactMap { $0 }.joined(separator: "\n\n")
-        let message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = Self.compactedCommandOutput(output)
         let succeeded = result.exitCode == 0
 
         events.append(UploadEvent(step: step, message: message, succeeded: succeeded))
@@ -108,6 +116,16 @@ public final class UploadJobRunner {
         guard succeeded else {
             throw UploadJobRunnerError.commandFailed(step: step, message: message)
         }
+    }
+
+    private static func compactedCommandOutput(_ output: String) -> String {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxCommandOutputCharacters else {
+            return trimmed
+        }
+
+        let suffix = String(trimmed.suffix(maxCommandOutputCharacters))
+        return "Output truncated to last \(maxCommandOutputCharacters) characters from \(trimmed.count) characters.\n\n...\n\(suffix)"
     }
 
     private func temporaryAuthenticationKeyDirectory() -> URL {

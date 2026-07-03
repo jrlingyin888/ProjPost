@@ -29,7 +29,8 @@ final class UploadCommandBuilderTests: XCTestCase {
             "-configuration", "Release",
             "-archivePath", "/tmp/Demo/build/Demo.xcarchive",
             "-destination", "generic/platform=iOS",
-            "-allowProvisioningUpdates"
+            "-allowProvisioningUpdates",
+            "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption=NO"
         ])
     }
 }

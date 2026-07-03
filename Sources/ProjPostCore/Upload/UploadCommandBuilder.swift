@@ -27,7 +27,8 @@ public struct UploadCommandBuilder {
             "-configuration", project.configuration,
             "-archivePath", archivePath.path,
             "-destination", "generic/platform=iOS",
-            "-allowProvisioningUpdates"
+            "-allowProvisioningUpdates",
+            "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption=NO"
         ]
 
         return Command(
@@ -61,8 +62,13 @@ public struct UploadCommandBuilder {
         )
     }
 
-    public func uploadCommand(ipaPath: URL, account: AppleAccountProfile) -> Command {
-        Command(
+    public func uploadCommand(ipaPath: URL, account: AppleAccountProfile, privateKeysDirectory: URL? = nil) -> Command {
+        var environment: [String: String] = [:]
+        if let privateKeysDirectory {
+            environment["API_PRIVATE_KEYS_DIR"] = privateKeysDirectory.path
+        }
+
+        return Command(
             executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
             arguments: [
                 "altool",
@@ -71,7 +77,8 @@ public struct UploadCommandBuilder {
                 "-t", "ios",
                 "--apiKey", account.keyID,
                 "--apiIssuer", account.issuerID
-            ]
+            ],
+            environment: environment
         )
     }
 }

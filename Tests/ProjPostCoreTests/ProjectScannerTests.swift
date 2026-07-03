@@ -23,6 +23,22 @@ final class ProjectScannerTests: XCTestCase {
         XCTAssertEqual(result.teamID, "ABCDE12345")
     }
 
+    func testScannerUsesDisplayNameForProjectProfileName() async throws {
+        let runner = FakeCommandRunner(results: [
+            CommandResult(exitCode: 0, stdout: #"{"workspace":{"name":"Demo.xcworkspace","schemes":["Demo"]}}"#, stderr: ""),
+            CommandResult(exitCode: 0, stdout: #"[{"target":"Demo","buildSettings":{"PRODUCT_BUNDLE_IDENTIFIER":"com.example.demo","MARKETING_VERSION":"1.2.3","CURRENT_PROJECT_VERSION":"45","DEVELOPMENT_TEAM":"ABCDE12345","INFOPLIST_KEY_CFBundleDisplayName":"Real App Name","PRODUCT_NAME":"Demo"}}]"#, stderr: "")
+        ])
+        let scanner = ProjectScanner(commandRunner: runner, fileSystem: ScannerFileSystem(entries: [
+            "/tmp/folder_name/Demo.xcworkspace",
+            "/tmp/folder_name/Demo.xcodeproj"
+        ]))
+
+        let result = try await scanner.scan(projectPath: URL(fileURLWithPath: "/tmp/folder_name"))
+
+        XCTAssertEqual(result.displayName, "Real App Name")
+        XCTAssertEqual(result.toProjectProfile().name, "Real App Name")
+    }
+
     func testScannerPrefersMatchingTargetBuildSettings() async throws {
         let runner = FakeCommandRunner(results: [
             CommandResult(exitCode: 0, stdout: #"{"workspace":{"name":"Demo.xcworkspace","schemes":["Demo"]}}"#, stderr: ""),
@@ -39,6 +55,26 @@ final class ProjectScannerTests: XCTestCase {
         XCTAssertEqual(result.version, "1.2.3")
         XCTAssertEqual(result.buildNumber, "45")
         XCTAssertEqual(result.teamID, "ABCDE12345")
+    }
+
+    func testScannerPrefersAppSchemeOverDependencySchemes() async throws {
+        let runner = FakeCommandRunner(results: [
+            CommandResult(exitCode: 0, stdout: #"{"workspace":{"name":"SCDL.xcworkspace","schemes":["Alamofire","Pods-SCDL","SCDL","SnapKit"]}}"#, stderr: ""),
+            CommandResult(exitCode: 0, stdout: #"[{"target":"SCDL","buildSettings":{"PRODUCT_BUNDLE_IDENTIFIER":"com.scdl.xyz","MARKETING_VERSION":"1.2.5","CURRENT_PROJECT_VERSION":"1","DEVELOPMENT_TEAM":"KR42D74ZCX"}}]"#, stderr: "")
+        ])
+        let scanner = ProjectScanner(commandRunner: runner, fileSystem: ScannerFileSystem(entries: [
+            "/tmp/scdl_ios_new/SCDL.xcworkspace",
+            "/tmp/scdl_ios_new/SCDL.xcodeproj"
+        ]))
+
+        let result = try await scanner.scan(projectPath: URL(fileURLWithPath: "/tmp/scdl_ios_new"))
+
+        XCTAssertEqual(result.selectedScheme, "SCDL")
+        XCTAssertEqual(result.bundleID, "com.scdl.xyz")
+        XCTAssertEqual(result.version, "1.2.5")
+        XCTAssertEqual(result.buildNumber, "1")
+        XCTAssertEqual(result.teamID, "KR42D74ZCX")
+        XCTAssertEqual(runner.commands.last?.arguments.prefix(4), ["-showBuildSettings", "-json", "-scheme", "SCDL"])
     }
 
     func testScannerThrowsWhenProjectSelectorIsMissing() async {

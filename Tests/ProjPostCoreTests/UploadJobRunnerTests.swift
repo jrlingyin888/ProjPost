@@ -51,6 +51,7 @@ final class UploadJobRunnerTests: XCTestCase {
         let exportCommand = runner.commands[1]
         let keyPathIndex = try XCTUnwrap(exportCommand.arguments.firstIndex(of: "-authenticationKeyPath"))
         let keyPath = try XCTUnwrap(exportCommand.arguments[safe: keyPathIndex + 1])
+        let keyDirectory = URL(fileURLWithPath: keyPath).deletingLastPathComponent().path
         XCTAssertTrue(keyPath.contains("projpost-upload-"))
         XCTAssertTrue(keyPath.hasSuffix("/AuthKey_ABC123DEF4.p8"))
         XCTAssertNotEqual(keyPath, FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_ABC123DEF4.p8").path)
@@ -70,6 +71,7 @@ final class UploadJobRunnerTests: XCTestCase {
                 "--apiIssuer", "issuer"
             ]
         )
+        XCTAssertEqual(runner.commands[2].environment["API_PRIVATE_KEYS_DIR"], keyDirectory)
     }
 
     func testTemporaryKeyIsRemovedWhenExportFails() async throws {
@@ -174,6 +176,45 @@ final class UploadJobRunnerTests: XCTestCase {
         }
         XCTAssertEqual(Set(keyPaths).count, 2)
         XCTAssertTrue(keyPaths.allSatisfy { $0.contains("projpost-upload-") && $0.hasSuffix("/AuthKey_ABC123DEF4.p8") })
+    }
+
+    func testRunnerCompactsLargeCommandOutputForConsole() async throws {
+        let fileSystem = MemoryFileSystem()
+        let longUploadOutput = String(repeating: "DEBUG app-store-connect-payload\n", count: 800)
+            + "UPLOAD SUCCEEDED with no errors\nDelivery UUID: ABC-123\n"
+        let runner = SequencedCommandRunner(results: [
+            CommandResult(exitCode: 0, stdout: "archive ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: "export ok", stderr: ""),
+            CommandResult(exitCode: 0, stdout: longUploadOutput, stderr: "")
+        ], fileSystem: fileSystem, exportArtifacts: ["Demo.ipa"])
+        let jobRunner = UploadJobRunner(
+            commandRunner: runner,
+            commandBuilder: UploadCommandBuilder(),
+            fileSystem: fileSystem
+        )
+        let project = ProjectProfile(
+            name: "Demo",
+            projectPath: "/tmp/Demo",
+            workspacePath: "/tmp/Demo/Demo.xcworkspace",
+            projectFilePath: nil,
+            scheme: "Demo",
+            configuration: "Release",
+            bundleID: "com.example.demo",
+            version: "1.0.0",
+            buildNumber: "1",
+            teamID: nil,
+            selectedAccountID: nil,
+            lastUpload: nil
+        )
+        let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: nil, lastVerifiedAt: nil)
+
+        let events = try await jobRunner.runLocalUpload(project: project, account: account, keyPath: "/tmp/AuthKey_ABC123DEF4.p8")
+
+        let uploadMessage = try XCTUnwrap(events.last?.message)
+        XCTAssertLessThanOrEqual(uploadMessage.count, 5_200)
+        XCTAssertTrue(uploadMessage.contains("Output truncated"))
+        XCTAssertTrue(uploadMessage.contains("UPLOAD SUCCEEDED with no errors"))
+        XCTAssertTrue(uploadMessage.contains("Delivery UUID: ABC-123"))
     }
 
     func testRunnerThrowsWhenExportProducesNoIPA() async throws {

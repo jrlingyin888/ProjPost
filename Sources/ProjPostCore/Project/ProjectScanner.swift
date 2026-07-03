@@ -10,10 +10,11 @@ public struct ProjectScanResult: Equatable {
     public var version: String?
     public var buildNumber: String?
     public var teamID: String?
+    public var displayName: String? = nil
 
     public func toProjectProfile(nameOverride: String? = nil) -> ProjectProfile {
         ProjectProfile(
-            name: nameOverride ?? projectPath.lastPathComponent,
+            name: nameOverride ?? displayName ?? projectPath.lastPathComponent,
             projectPath: projectPath.path,
             workspacePath: workspacePath?.path,
             projectFilePath: projectFilePath?.path,
@@ -43,7 +44,7 @@ public final class ProjectScanner {
         let projectFile = findFirst(projectPath: projectPath, suffix: ".xcodeproj")
         let listJSON = try await runXcodebuildList(projectPath: projectPath, workspace: workspace, projectFile: projectFile)
         let schemes = try parseSchemes(from: listJSON)
-        let selectedScheme = schemes.first
+        let selectedScheme = selectScheme(from: schemes, projectPath: projectPath, workspace: workspace, projectFile: projectFile)
         let settings = try await runBuildSettings(projectPath: projectPath, workspace: workspace, projectFile: projectFile, scheme: selectedScheme)
 
         return ProjectScanResult(
@@ -55,7 +56,8 @@ public final class ProjectScanner {
             bundleID: settings["PRODUCT_BUNDLE_IDENTIFIER"],
             version: settings["MARKETING_VERSION"],
             buildNumber: settings["CURRENT_PROJECT_VERSION"],
-            teamID: settings["DEVELOPMENT_TEAM"]
+            teamID: settings["DEVELOPMENT_TEAM"],
+            displayName: displayName(from: settings)
         )
     }
 
@@ -98,6 +100,22 @@ public final class ProjectScanner {
         return settings?.compactMapValues { $0 as? String } ?? [:]
     }
 
+    private func selectScheme(from schemes: [String], projectPath: URL, workspace: URL?, projectFile: URL?) -> String? {
+        let preferredNames = [
+            workspace?.deletingPathExtension().lastPathComponent,
+            projectFile?.deletingPathExtension().lastPathComponent,
+            projectPath.lastPathComponent
+        ].compactMap { $0 }.filter { !$0.isEmpty }
+
+        for preferredName in preferredNames {
+            if let exactMatch = schemes.first(where: { $0.caseInsensitiveCompare(preferredName) == .orderedSame }) {
+                return exactMatch
+            }
+        }
+
+        return schemes.first
+    }
+
     private func selectBuildSettingsEntry(from entries: [[String: Any]], matchingTarget: String?) -> [String: Any]? {
         if let matchingTarget, let exactMatch = entries.first(where: { $0["target"] as? String == matchingTarget }) {
             return exactMatch
@@ -114,6 +132,23 @@ public final class ProjectScanner {
         guard let buildSettings = entry["buildSettings"] as? [String: Any] else { return false }
         guard let bundleIdentifier = buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] as? String else { return false }
         return !bundleIdentifier.isEmpty
+    }
+
+    private func displayName(from settings: [String: String]) -> String? {
+        [
+            settings["INFOPLIST_KEY_CFBundleDisplayName"],
+            settings["INFOPLIST_KEY_CFBundleName"],
+            settings["PRODUCT_NAME"]
+        ].compactMap(normalizedDisplayName).first
+    }
+
+    private func normalizedDisplayName(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.contains("$(") else { return nil }
+        return trimmed
     }
 
     private func xcodebuildProjectArguments(projectPath: URL, workspace: URL?, projectFile: URL?) throws -> [String] {

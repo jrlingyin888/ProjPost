@@ -2,10 +2,25 @@ import ProjPostCore
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum AccountFileImport {
+    case metadata
+    case privateKey
+
+    var allowedContentTypes: [UTType] {
+        switch self {
+        case .metadata:
+            return [.plainText, .rtf, UTType(filenameExtension: "txt") ?? .plainText]
+        case .privateKey:
+            return [UTType(filenameExtension: "p8") ?? .data, .data]
+        }
+    }
+}
+
 struct ProjectDetailView: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var showYellowConfirmation = false
-    @State private var showPrivateKeyImporter = false
+    @State private var showAccountFileImporter = false
+    @State private var activeAccountFileImport: AccountFileImport?
+    @State private var isEditingSavedAccount = false
 
     var body: some View {
         ScrollView {
@@ -13,32 +28,25 @@ struct ProjectDetailView: View {
                 header
                 projectFields
                 accountFields
-                CheckResultsView(results: viewModel.checkResults)
                 uploadActions
                 UploadProgressView(state: viewModel.uploadState, events: viewModel.uploadEvents)
             }
             .padding(20)
         }
-        .alert("Proceed with yellow issues?", isPresented: $showYellowConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Upload") {
-                Task {
-                    await viewModel.startUpload(confirmedYellowIssues: true)
-                }
-            }
-        } message: {
-            Text("Configuration checks returned warnings that need explicit confirmation before upload.")
-        }
         .fileImporter(
-            isPresented: $showPrivateKeyImporter,
-            allowedContentTypes: [UTType(filenameExtension: "p8") ?? .data, .data],
+            isPresented: $showAccountFileImporter,
+            allowedContentTypes: activeAccountFileImport?.allowedContentTypes ?? [.data],
             allowsMultipleSelection: false
         ) { result in
+            defer { activeAccountFileImport = nil }
             guard case let .success(urls) = result, let url = urls.first else { return }
-            do {
-                try viewModel.importPrivateKey(from: url)
-            } catch {
-                // AppViewModel already translates failures into non-secret UI state.
+            switch activeAccountFileImport {
+            case .metadata:
+                importAccountMetadata(from: url)
+            case .privateKey:
+                importPrivateKey(from: url)
+            case nil:
+                break
             }
         }
     }
@@ -63,6 +71,7 @@ struct ProjectDetailView: View {
                 } label: {
                     Label("Load", systemImage: "arrow.clockwise")
                 }
+                .disabled(viewModel.isOperationRunning)
 
                 Button {
                     do {
@@ -74,6 +83,7 @@ struct ProjectDetailView: View {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isOperationRunning)
             }
         }
     }
@@ -160,6 +170,7 @@ struct ProjectDetailView: View {
         } label: {
             Label("Project Workbench", systemImage: "shippingbox")
         }
+        .disabled(viewModel.isOperationRunning)
     }
 
     private var accountFields: some View {
@@ -174,33 +185,40 @@ struct ProjectDetailView: View {
                     }
                 }
 
-                editableRow("Account", text: Binding(
-                    get: { viewModel.accountDraft.displayName },
-                    set: { updateAccount(displayName: $0) }
-                ))
-                editableRow("Key ID", text: Binding(
-                    get: { viewModel.accountDraft.keyID },
-                    set: { updateAccount(keyID: $0) }
-                ))
-                editableRow("Issuer ID", text: Binding(
-                    get: { viewModel.accountDraft.issuerID },
-                    set: { updateAccount(issuerID: $0) }
-                ))
-                editableRow("Team ID", text: Binding(
-                    get: { viewModel.accountDraft.teamID },
-                    set: { updateAccount(teamID: $0) }
-                ))
+                if let savedAccount = savedSelectedAccount, !isEditingSavedAccount {
+                    savedAccountSummary(savedAccount)
+                } else {
+                    accountEditableFields
+                }
 
                 HStack(spacing: 12) {
-                    Button {
-                        viewModel.saveAccountProfile()
-                    } label: {
-                        Label("Save Account", systemImage: "square.and.arrow.down")
+                    if savedSelectedAccount != nil && !isEditingSavedAccount {
+                        Button {
+                            isEditingSavedAccount = true
+                        } label: {
+                            Label("Edit Account", systemImage: "pencil")
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button {
+                            viewModel.saveAccountProfile()
+                            isEditingSavedAccount = false
+                        } label: {
+                            Label("Save Account", systemImage: "square.and.arrow.down")
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
 
                     Button {
-                        showPrivateKeyImporter = true
+                        isEditingSavedAccount = true
+                        presentAccountFileImporter(.metadata)
+                    } label: {
+                        Label("Import Metadata", systemImage: "doc.text")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        presentAccountFileImporter(.privateKey)
                     } label: {
                         Label("Import .p8", systemImage: "key.horizontal")
                     }
@@ -214,6 +232,7 @@ struct ProjectDetailView: View {
         } label: {
             Label("Apple Account", systemImage: "person.crop.square")
         }
+        .disabled(viewModel.isOperationRunning)
     }
 
     private var uploadActions: some View {
@@ -222,27 +241,35 @@ struct ProjectDetailView: View {
                 HStack {
                     Button {
                         Task {
-                            await viewModel.runChecks()
+                            await viewModel.startUpload()
                         }
                     } label: {
-                        Label("Run Checks", systemImage: "checklist")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.hasUnappliedProjectChanges)
-
-                    Button {
-                        if viewModel.hasCurrentYellowChecks {
-                            showYellowConfirmation = true
-                        } else {
-                            Task {
-                                await viewModel.startUpload()
-                            }
-                        }
-                    } label: {
-                        Label("Upload to TestFlight", systemImage: "icloud.and.arrow.up")
+                        uploadButtonLabel
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.hasUnappliedProjectChanges)
+                    .disabled(viewModel.hasUnappliedProjectChanges || viewModel.isOperationRunning)
+
+                    if viewModel.canQueryLatestBuildTestFlightStatus {
+                        Button {
+                            Task {
+                                await viewModel.refreshLatestBuildTestFlightStatus()
+                            }
+                        } label: {
+                            Label("Refresh TF Status", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.isOperationRunning)
+
+                        Button {
+                            Task {
+                                await viewModel.submitLatestBuildForBetaReview()
+                            }
+                        } label: {
+                            betaReviewButtonLabel
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!viewModel.canSubmitLatestBuildForBetaReview)
+                    }
 
                     Spacer()
                 }
@@ -251,15 +278,184 @@ struct ProjectDetailView: View {
                     .font(.caption)
                     .foregroundStyle(statusColor)
 
+                if let betaReviewStatusText {
+                    Text(betaReviewStatusText)
+                        .font(.caption)
+                        .foregroundStyle(betaReviewStatusColor)
+                }
+
                 Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
-                    placeholderRow(title: "Internal testers", value: "Available after the next successful upload")
-                    placeholderRow(title: "Public TestFlight link", value: "Create a public link after Apple finishes processing")
-                }
+                distributionSection
             }
         } label: {
             Label("TestFlight Upload", systemImage: "paperplane")
+        }
+    }
+
+    private var autoLinkExternalGroupsBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.selectedProject?.autoLinkExternalGroupsAfterBetaApproval ?? true },
+            set: { viewModel.updateAutoLinkExternalGroupsAfterBetaApproval($0) }
+        )
+    }
+
+    private var distributionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Auto link approved build to external groups", isOn: autoLinkExternalGroupsBinding)
+                .disabled(viewModel.isOperationRunning)
+
+            switch viewModel.testFlightDistributionState {
+            case .idle:
+                placeholderRow(title: "TestFlight Distribution", value: "Refresh TF Status to load tester groups.")
+            case .loading:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading TestFlight groups...")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            case .linking(let snapshot):
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Linking external TestFlight groups...")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let snapshot {
+                        distributionSnapshotView(snapshot)
+                    }
+                }
+            case .loaded(let snapshot):
+                distributionSnapshotView(snapshot)
+            case .failed(let message):
+                placeholderRow(title: "TestFlight Distribution", value: message)
+            }
+        }
+    }
+
+    private func distributionSnapshotView(_ snapshot: TestFlightDistributionSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                placeholderRow(
+                    title: "Current build",
+                    value: "\(snapshot.version) (\(snapshot.buildNumber)) · \(snapshot.betaReviewStateText)"
+                )
+                Spacer()
+                Button {
+                    Task {
+                        await viewModel.linkExternalGroupsForLatestBuild()
+                    }
+                } label: {
+                    Label("Link External Groups", systemImage: "link")
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isOperationRunning || snapshot.externalGroups.isEmpty)
+            }
+
+            if !snapshot.internalGroups.isEmpty {
+                Text("Internal Testing")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(snapshot.internalGroups) { group in
+                    distributionGroupRow(group)
+                }
+            }
+
+            Text("External Testing")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if snapshot.externalGroups.isEmpty {
+                placeholderRow(title: "External groups", value: "No external TestFlight groups found.")
+            } else {
+                ForEach(snapshot.externalGroups) { group in
+                    distributionGroupRow(group)
+                }
+            }
+        }
+    }
+
+    private func distributionGroupRow(_ group: TestFlightDistributionGroup) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: group.isCurrentBuildAssociated ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(group.isCurrentBuildAssociated ? .green : .secondary)
+                Text(group.name)
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text(groupStatusText(group))
+                    .font(.caption)
+                    .foregroundStyle(groupStatusColor(group))
+            }
+
+            if let publicLink = group.publicLink, !publicLink.isEmpty {
+                Text(publicLink)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .foregroundStyle(.blue)
+            } else if !group.isInternalGroup {
+                Text(group.publicLinkEnabled ? "Public link pending from Apple." : "Public link not enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch group.operationState {
+            case .idle:
+                EmptyView()
+            case .linked:
+                Text("Linked")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            case .failed(let message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func groupStatusText(_ group: TestFlightDistributionGroup) -> String {
+        if group.isInternalGroup {
+            return "Internal"
+        }
+        return group.publicLinkEnabled ? "Link On" : "Link Off"
+    }
+
+    private func groupStatusColor(_ group: TestFlightDistributionGroup) -> Color {
+        if group.isInternalGroup {
+            return .secondary
+        }
+        return group.publicLinkEnabled ? .green : .secondary
+    }
+
+    @ViewBuilder
+    private var uploadButtonLabel: some View {
+        if viewModel.isUploadInProgress {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Uploading...")
+            }
+        } else {
+            Label("Upload to TestFlight", systemImage: "icloud.and.arrow.up")
+        }
+    }
+
+    @ViewBuilder
+    private var betaReviewButtonLabel: some View {
+        if case .running = viewModel.betaReviewState {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Working...")
+            }
+        } else {
+            Label("Submit to Beta Review", systemImage: "paperplane.circle")
         }
     }
 
@@ -273,6 +469,69 @@ struct ProjectDetailView: View {
         }
     }
 
+    private var accountEditableFields: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            editableRow("Account", text: Binding(
+                get: { viewModel.accountDraft.displayName },
+                set: { updateAccount(displayName: $0) }
+            ))
+            editableRow("Key ID", text: Binding(
+                get: { viewModel.accountDraft.keyID },
+                set: { updateAccount(keyID: $0) }
+            ))
+            editableRow("Issuer ID", text: Binding(
+                get: { viewModel.accountDraft.issuerID },
+                set: { updateAccount(issuerID: $0) }
+            ))
+            editableRow("Team ID", text: Binding(
+                get: { viewModel.accountDraft.teamID },
+                set: { updateAccount(teamID: $0) }
+            ))
+        }
+    }
+
+    private var savedSelectedAccount: AppleAccountProfile? {
+        guard let selectedAccountID = viewModel.selectedProject?.selectedAccountID else { return nil }
+        return viewModel.accountProfiles.first(where: { $0.id == selectedAccountID })
+    }
+
+    private func savedAccountSummary(_ profile: AppleAccountProfile) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Current Account", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Spacer()
+                Text(profile.displayName)
+                    .font(.headline)
+            }
+
+            HStack(alignment: .top, spacing: 18) {
+                summaryValue("Key ID", maskedIdentifier(profile.keyID))
+                summaryValue("Issuer ID", maskedIdentifier(profile.issuerID))
+                summaryValue("Team ID", profile.teamID.map(maskedIdentifier) ?? "-")
+            }
+        }
+        .font(.caption)
+    }
+
+    private func summaryValue(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout.monospaced())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func maskedIdentifier(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 8 else {
+            return String(repeating: "*", count: max(trimmed.count, 4))
+        }
+        return "\(trimmed.prefix(4))...\(trimmed.suffix(4))"
+    }
+
     private func updateAccount(displayName: String? = nil, keyID: String? = nil, issuerID: String? = nil, teamID: String? = nil) {
         viewModel.updateAccountDraft(
             displayName: displayName ?? viewModel.accountDraft.displayName,
@@ -282,10 +541,51 @@ struct ProjectDetailView: View {
         )
     }
 
+    private func presentAccountFileImporter(_ importType: AccountFileImport) {
+        activeAccountFileImport = importType
+        showAccountFileImporter = true
+    }
+
+    private func importAccountMetadata(from url: URL) {
+        let canAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if canAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            try viewModel.importAppleAccountMetadata(from: url)
+        } catch {
+            viewModel.uploadState = .failed(message: "Metadata import failed: \(error)")
+        }
+    }
+
+    private func importPrivateKey(from url: URL) {
+        let canAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if canAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            try viewModel.importPrivateKey(from: url)
+        } catch {
+            if case .failed = viewModel.uploadState {
+                return
+            }
+            viewModel.uploadState = .failed(message: "Private key import failed: \(error)")
+        }
+    }
+
     private var accountSelectionBinding: Binding<UUID?> {
         Binding(
             get: { viewModel.selectedProject?.selectedAccountID },
-            set: { viewModel.selectAccountProfile($0) }
+            set: {
+                isEditingSavedAccount = false
+                viewModel.selectAccountProfile($0)
+            }
         )
     }
 
@@ -318,14 +618,38 @@ struct ProjectDetailView: View {
         if viewModel.hasUnappliedProjectChanges {
             return "Apply project changes before running checks or uploading."
         }
-        return viewModel.checksAreCurrent ? "Checks are current for this project and Apple account." : "Run checks again after any project, account, or key change."
+        return "Configuration checks run automatically when upload starts."
     }
 
     private var statusColor: Color {
         if viewModel.hasUnappliedProjectChanges {
             return .orange
         }
-        return viewModel.checksAreCurrent ? .secondary : .orange
+        return .secondary
+    }
+
+    private var betaReviewStatusText: String? {
+        switch viewModel.betaReviewState {
+        case .idle:
+            return nil
+        case .running:
+            return "Updating TestFlight status..."
+        case .succeeded(let message):
+            return message
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var betaReviewStatusColor: Color {
+        switch viewModel.betaReviewState {
+        case .failed:
+            return .orange
+        case .succeeded:
+            return .green
+        default:
+            return .secondary
+        }
     }
 
     private func placeholderRow(title: String, value: String) -> some View {

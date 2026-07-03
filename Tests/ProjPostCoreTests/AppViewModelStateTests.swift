@@ -58,6 +58,382 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(accountStore.savedProfiles, [])
     }
 
+    func testNewProjectsDefaultExternalGroupAutomationOn() {
+        let project = makeProject(name: "Demo")
+
+        XCTAssertTrue(project.autoLinkExternalGroupsAfterBetaApproval)
+    }
+
+    func testTogglingExternalGroupAutomationPersistsWithProject() {
+        let project = makeProject(name: "Demo")
+        let store = FakeProjectProfileStore()
+        let viewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [project]
+        )
+
+        viewModel.updateAutoLinkExternalGroupsAfterBetaApproval(false)
+
+        XCTAssertEqual(viewModel.selectedProject?.autoLinkExternalGroupsAfterBetaApproval, false)
+        XCTAssertEqual(store.savedProfiles.first?.autoLinkExternalGroupsAfterBetaApproval, false)
+    }
+
+    func testSaveAccountProfilePersistsAccountAndSelectedProjectReferenceImmediately() throws {
+        let project = makeProject(name: "Demo")
+        let store = FakeProjectProfileStore()
+        let accountStore = FakeAppleAccountProfileStore()
+        let viewModel = AppViewModel(
+            store: store,
+            accountStore: accountStore,
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [project]
+        )
+
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123")
+        viewModel.saveAccountProfile()
+
+        let savedAccount = try XCTUnwrap(viewModel.accountProfile)
+        XCTAssertEqual(accountStore.savedProfiles, [savedAccount])
+        XCTAssertEqual(store.savedProfiles.first?.selectedAccountID, savedAccount.id)
+    }
+
+    func testSavingCurrentDraftAccountPreservesChecksAndUploadConsoleState() async {
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1")
+        let results = [CheckResult(id: "build-number", title: "Build Number 可用", message: "1.2.6 (1)", severity: .green)]
+        let events = [UploadEvent(step: .upload, message: "Uploading archive", succeeded: true)]
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(results: results),
+            uploadRunner: FakeUploadJobRunner(events: events),
+            projects: [project]
+        )
+
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123")
+        await viewModel.startUpload()
+
+        viewModel.saveAccountProfile()
+
+        XCTAssertEqual(viewModel.checkResults, results)
+        XCTAssertEqual(viewModel.uploadEvents.count, 2)
+        XCTAssertEqual(viewModel.uploadEvents.first?.step, .checkBundleAndApp)
+        XCTAssertEqual(viewModel.uploadEvents.first?.message, "[OK] Build Number 可用\n1.2.6 (1)")
+        XCTAssertEqual(Array(viewModel.uploadEvents.dropFirst()), events)
+        XCTAssertTrue(viewModel.checksAreCurrent)
+        XCTAssertEqual(viewModel.uploadState, .succeeded(message: "Upload finished successfully."))
+    }
+
+    func testProjectWorkbenchEditsAutosaveProfile() {
+        let project = makeProject(name: "Demo", version: "1.2.5", buildNumber: "1")
+        let store = FakeProjectProfileStore()
+        let viewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [project]
+        )
+
+        viewModel.updateSelectedProjectVersion("1.2.6")
+
+        XCTAssertEqual(store.savedProfiles.first?.version, "1.2.6")
+        XCTAssertEqual(store.loadResult.first?.version, "1.2.6")
+    }
+
+    func testFailedUploadSummaryAutosavesForNextLaunch() async {
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1")
+        let store = FakeProjectProfileStore()
+        let viewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(error: TestError.unavailable),
+            projects: [project]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123")
+
+        await viewModel.startUpload()
+
+        XCTAssertEqual(store.savedProfiles.first?.lastUpload?.succeeded, false)
+        XCTAssertEqual(store.loadResult.first?.lastUpload?.succeeded, false)
+    }
+
+    func testSubmitLatestBuildForBetaReviewUsesCurrentVersionBuild() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.lastUpload = UploadSummary(version: "1.2.6", buildNumber: "1", uploadedAt: Date(), succeeded: true, message: "Upload finished successfully.")
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID")],
+            submission: ASCBetaReviewSubmission(id: "submission-123", betaReviewState: "IN_REVIEW")
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.submitLatestBuildForBetaReview()
+
+        XCTAssertEqual(appStoreConnect.fetchAppBundleIDs, ["com.example.demo"])
+        XCTAssertEqual(appStoreConnect.fetchBuildRequests, [
+            FakeAppStoreConnectClient.FetchBuildRequest(appID: "app-123", appVersion: "1.2.6", buildNumber: "1")
+        ])
+        XCTAssertEqual(appStoreConnect.submittedBuildIDs, ["build-123"])
+        XCTAssertEqual(viewModel.betaReviewState, .succeeded(message: "Submitted to TestFlight review. State: In Review"))
+    }
+
+    func testRefreshLatestBuildTestFlightStatusShowsBetaReviewState() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.lastUpload = UploadSummary(version: "1.2.6", buildNumber: "1", uploadedAt: Date(), succeeded: true, message: "Upload finished successfully.")
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "WAITING_FOR_REVIEW")]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshLatestBuildTestFlightStatus()
+
+        XCTAssertEqual(appStoreConnect.fetchBuildRequests, [
+            FakeAppStoreConnectClient.FetchBuildRequest(appID: "app-123", appVersion: "1.2.6", buildNumber: "1")
+        ])
+        XCTAssertEqual(viewModel.betaReviewState, .succeeded(message: "TestFlight status: Waiting for Review"))
+    }
+
+    func testRefreshLatestBuildTestFlightStatusDoesNotRequireLastUploadSuccess() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "IN_REVIEW")]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshLatestBuildTestFlightStatus()
+
+        XCTAssertEqual(appStoreConnect.fetchBuildRequests, [
+            FakeAppStoreConnectClient.FetchBuildRequest(appID: "app-123", appVersion: "1.2.6", buildNumber: "1")
+        ])
+        XCTAssertEqual(viewModel.betaReviewState, .succeeded(message: "TestFlight status: In Review"))
+    }
+
+    func testAutomaticChecksRunOnceWhenReady() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let results = [CheckResult(id: "bundle-id", title: "Bundle ID 已找到", message: "com.example.demo", severity: .green)]
+        let checkEngine = FakeConfigurationCheckEngine(results: results)
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(savedKeys: [account.id: "stored-key"]),
+            scanner: FakeProjectScanner(),
+            checkEngine: checkEngine,
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.runChecksAutomaticallyIfNeeded()
+        await viewModel.runChecksAutomaticallyIfNeeded()
+
+        XCTAssertEqual(checkEngine.runCallCount, 1)
+        XCTAssertEqual(viewModel.checkResults, results)
+        XCTAssertTrue(viewModel.checksAreCurrent)
+    }
+
+    func testAutomaticChecksWaitForSavedPrivateKey() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let checkEngine = FakeConfigurationCheckEngine()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: checkEngine,
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.runChecksAutomaticallyIfNeeded()
+
+        XCTAssertEqual(checkEngine.runCallCount, 0)
+        XCTAssertTrue(viewModel.checkResults.isEmpty)
+    }
+
+    func testDeleteProjectRemovesPersistsAndSelectsNextProject() {
+        let first = makeProject(name: "First")
+        let second = makeProject(name: "Second")
+        let store = FakeProjectProfileStore()
+        let viewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [first, second]
+        )
+
+        viewModel.deleteProject(first.id)
+
+        XCTAssertEqual(viewModel.projects, [second])
+        XCTAssertEqual(viewModel.selectedProject?.id, second.id)
+        XCTAssertEqual(store.savedProfiles, [second])
+    }
+
+    func testDeleteProjectsRemovesMultiplePersistsAndSelectsRemainingProject() {
+        let first = makeProject(name: "First")
+        let second = makeProject(name: "Second")
+        let third = makeProject(name: "Third")
+        let store = FakeProjectProfileStore()
+        let viewModel = AppViewModel(
+            store: store,
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [first, second, third]
+        )
+
+        viewModel.deleteProjects([first.id, third.id])
+
+        XCTAssertEqual(viewModel.projects, [second])
+        XCTAssertEqual(viewModel.selectedProject?.id, second.id)
+        XCTAssertEqual(store.savedProfiles, [second])
+    }
+
+    func testUploadInProgressLocksProjectAndAccountChanges() async {
+        let firstAccount = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "First",
+            keyID: "FIRSTKEY01",
+            issuerID: "first-issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let secondAccount = AppleAccountProfile(
+            id: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!,
+            displayName: "Second",
+            keyID: "SECONDKEY1",
+            issuerID: "second-issuer",
+            teamID: "TEAM456",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: firstAccount.id)
+        let runner = SuspendingUploadJobRunner(events: [
+            UploadEvent(step: .upload, message: "Upload complete", succeeded: true)
+        ])
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: runner,
+            projects: [project],
+            accountProfiles: [firstAccount, secondAccount]
+        )
+
+        await viewModel.runChecks()
+        let uploadTask = Task {
+            await viewModel.startUpload()
+        }
+        await runner.waitUntilStarted()
+
+        XCTAssertTrue(viewModel.isOperationRunning)
+        XCTAssertTrue(viewModel.isUploadInProgress)
+
+        viewModel.updateSelectedProjectVersion("9.9.9")
+        viewModel.updateAccountDraft(displayName: "Changed", keyID: "CHANGEDKEY", issuerID: "changed-issuer", teamID: "CHANGED")
+        viewModel.selectAccountProfile(secondAccount.id)
+
+        XCTAssertEqual(viewModel.selectedProject?.version, "1.2.6")
+        XCTAssertEqual(viewModel.accountProfile?.id, firstAccount.id)
+        XCTAssertEqual(viewModel.accountDraft.displayName, "First")
+
+        runner.finish()
+        await uploadTask.value
+    }
+
     func testScanProjectPathAddsScannedProjectAndSelectsIt() async throws {
         let scanned = ProjectScanResult(
             projectPath: URL(fileURLWithPath: "/tmp/Demo"),
@@ -85,6 +461,40 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.projects.count, 1)
         XCTAssertEqual(viewModel.selectedProject?.projectPath, "/tmp/Demo")
         XCTAssertEqual(viewModel.selectedProject?.bundleID, "com.example.demo")
+    }
+
+    func testAddProjectFromDirectoryScansAndAppendsWithoutReplacingSelectedProject() async throws {
+        let existing = makeProject(name: "Existing")
+        let scanned = ProjectScanResult(
+            projectPath: URL(fileURLWithPath: "/tmp/NewDemo"),
+            workspacePath: URL(fileURLWithPath: "/tmp/NewDemo/NewDemo.xcworkspace"),
+            projectFilePath: nil,
+            schemes: ["NewDemo"],
+            selectedScheme: "NewDemo",
+            bundleID: "com.example.newdemo",
+            version: "2.0",
+            buildNumber: "20",
+            teamID: "NEWTEAM123"
+        )
+        let scanner = FakeProjectScanner(result: scanned)
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: scanner,
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [existing]
+        )
+
+        try await viewModel.addProjectFromDirectory(URL(fileURLWithPath: "/tmp/NewDemo"))
+
+        XCTAssertEqual(scanner.scannedPaths, ["/tmp/NewDemo"])
+        XCTAssertEqual(viewModel.projects.count, 2)
+        XCTAssertEqual(viewModel.projects[0].id, existing.id)
+        XCTAssertEqual(viewModel.projects[0].projectPath, existing.projectPath)
+        XCTAssertEqual(viewModel.selectedProject?.projectPath, "/tmp/NewDemo")
+        XCTAssertEqual(viewModel.selectedProject?.bundleID, "com.example.newdemo")
     }
 
     func testRunChecksWithoutValidAccountFailsWithClearState() async {
@@ -163,14 +573,21 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(runner.receivedProjects.isEmpty)
     }
 
-    func testStartUploadRequiresCurrentChecksBeforeUpload() async {
-        let runner = FakeUploadJobRunner()
+    func testStartUploadRunsChecksAndWritesCheckSummaryBeforeUpload() async {
+        let uploadEvents = [UploadEvent(step: .upload, message: "Upload complete", succeeded: true)]
+        let runner = FakeUploadJobRunner(events: uploadEvents)
+        let checkEngine = FakeConfigurationCheckEngine(
+            results: [
+                CheckResult(id: "xcode", title: "Xcode 可用", message: "Xcode 26.6", severity: .green),
+                CheckResult(id: "bundle", title: "Bundle ID 已找到", message: "com.example.demo", severity: .green)
+            ]
+        )
         let viewModel = AppViewModel(
             store: FakeProjectProfileStore(),
             accountStore: FakeAppleAccountProfileStore(),
             credentialVault: FakeCredentialVault(),
             scanner: FakeProjectScanner(),
-            checkEngine: FakeConfigurationCheckEngine(),
+            checkEngine: checkEngine,
             uploadRunner: runner,
             projects: [makeProject(name: "Demo")]
         )
@@ -178,11 +595,12 @@ final class AppViewModelStateTests: XCTestCase {
 
         await viewModel.startUpload()
 
-        XCTAssertEqual(
-            viewModel.uploadState,
-            .failed(message: "Run configuration checks for the current project and Apple account before uploading.")
-        )
-        XCTAssertTrue(runner.receivedProjects.isEmpty)
+        XCTAssertEqual(checkEngine.runCallCount, 1)
+        XCTAssertEqual(runner.receivedProjects.count, 1)
+        XCTAssertEqual(viewModel.uploadEvents.map(\.step), [.checkBundleAndApp, .upload])
+        XCTAssertEqual(viewModel.uploadEvents.first?.succeeded, true)
+        XCTAssertTrue(viewModel.uploadEvents.first?.message.contains("[OK] Xcode 可用") == true)
+        XCTAssertEqual(viewModel.uploadState, .succeeded(message: "Upload finished successfully."))
     }
 
     func testProjectEditsInvalidateChecksAndBlockUploadUntilChecksRerun() async {
@@ -259,7 +677,6 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertFalse(viewModel.hasUnappliedProjectChanges)
         XCTAssertTrue(viewModel.projectMutationSummary.isEmpty)
 
-        await viewModel.runChecks()
         await viewModel.startUpload()
 
         XCTAssertEqual(checkEngine.runCallCount, 1)
@@ -291,7 +708,6 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertFalse(viewModel.hasUnappliedProjectChanges)
         XCTAssertTrue(viewModel.projectMutationSummary.isEmpty)
 
-        await viewModel.runChecks()
         await viewModel.startUpload()
 
         XCTAssertEqual(checkEngine.runCallCount, 1)
@@ -393,7 +809,7 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(reloadedRunner.receivedProjects.isEmpty)
     }
 
-    func testAccountEditsInvalidateChecksAndBlockUploadUntilChecksRerun() async {
+    func testAccountEditsInvalidateChecksAndUploadRunsFreshChecks() async {
         let runner = FakeUploadJobRunner()
         let checkEngine = FakeConfigurationCheckEngine()
         let viewModel = AppViewModel(
@@ -412,13 +828,10 @@ final class AppViewModelStateTests: XCTestCase {
 
         await viewModel.startUpload()
 
-        XCTAssertEqual(checkEngine.runCallCount, 1)
+        XCTAssertEqual(checkEngine.runCallCount, 2)
         XCTAssertTrue(viewModel.checkResults.isEmpty)
-        XCTAssertEqual(
-            viewModel.uploadState,
-            .failed(message: "Run configuration checks for the current project and Apple account before uploading.")
-        )
-        XCTAssertTrue(runner.receivedProjects.isEmpty)
+        XCTAssertEqual(viewModel.uploadState, .succeeded(message: "Upload finished successfully."))
+        XCTAssertEqual(runner.receivedAccounts.first?.displayName, "Updated Company")
     }
 
     func testStartUploadFailsWhenRedChecksBlockUpload() async {
@@ -444,7 +857,7 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(runner.receivedProjects.isEmpty)
     }
 
-    func testStartUploadFailsWhenYellowChecksNeedConfirmation() async {
+    func testStartUploadContinuesWhenYellowChecksWarn() async {
         let runner = FakeUploadJobRunner()
         let checkEngine = FakeConfigurationCheckEngine(
             results: [CheckResult(id: "team", title: "Confirm Team", message: "Needs confirmation", severity: .yellow)]
@@ -460,11 +873,12 @@ final class AppViewModelStateTests: XCTestCase {
         )
         viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: nil)
 
-        await viewModel.runChecks()
         await viewModel.startUpload()
 
-        XCTAssertEqual(viewModel.uploadState, .failed(message: "Upload requires confirmation for yellow configuration issues."))
-        XCTAssertTrue(runner.receivedProjects.isEmpty)
+        XCTAssertEqual(viewModel.uploadState, .succeeded(message: "Upload finished successfully."))
+        XCTAssertEqual(runner.receivedProjects.count, 1)
+        XCTAssertEqual(viewModel.uploadEvents.first?.step, .checkBundleAndApp)
+        XCTAssertEqual(viewModel.uploadEvents.first?.message, "[WARN] Confirm Team\nNeeds confirmation")
     }
 
     func testStartUploadWithConfirmedYellowIssuesRunsUploadAndCapturesEvents() async {
@@ -488,12 +902,13 @@ final class AppViewModelStateTests: XCTestCase {
         )
         viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123")
 
-        await viewModel.runChecks()
-
-        await viewModel.startUpload(confirmedYellowIssues: true)
+        await viewModel.startUpload()
 
         XCTAssertEqual(runner.receivedProjects.first?.id, project.id)
-        XCTAssertEqual(viewModel.uploadEvents, events)
+        XCTAssertEqual(viewModel.uploadEvents.count, 3)
+        XCTAssertEqual(viewModel.uploadEvents.first?.step, .checkBundleAndApp)
+        XCTAssertEqual(viewModel.uploadEvents.first?.message, "[WARN] Confirm Team\nNeeds confirmation")
+        XCTAssertEqual(Array(viewModel.uploadEvents.dropFirst()), events)
         XCTAssertEqual(viewModel.uploadState, .succeeded(message: "Upload finished successfully."))
         XCTAssertEqual(viewModel.selectedProject?.lastUpload?.version, "1.2.3")
         XCTAssertEqual(viewModel.selectedProject?.lastUpload?.buildNumber, "42")
@@ -556,6 +971,50 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.accountDraft.keyID, "KEY1234567")
         XCTAssertEqual(viewModel.accountProfiles, [])
     }
+
+    func testImportPrivateKeyFromUnreadableFileReportsVisibleFailure() throws {
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [makeProject(name: "Demo")]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123")
+
+        XCTAssertThrowsError(try viewModel.importPrivateKey(from: URL(fileURLWithPath: "/tmp/missing-key.p8")))
+        XCTAssertEqual(viewModel.privateKeyStatus, .failed)
+        XCTAssertEqual(viewModel.uploadState, .failed(message: "Failed to read the App Store Connect private key file."))
+    }
+
+    func testImportAppleAccountMetadataTextUpdatesDraftWithoutSavingPrivateKey() throws {
+        let vault = FakeCredentialVault()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: vault,
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [makeProject(name: "Demo")]
+        )
+        viewModel.updateAccountDraft(displayName: "Company", keyID: "OLDKEY", issuerID: "old-issuer", teamID: nil)
+
+        try viewModel.importAppleAccountMetadataText("""
+        Issuer ID: imported-issuer
+        Key ID: NEWKEY1234
+        Team ID: TEAM999999
+        """)
+
+        XCTAssertEqual(viewModel.accountDraft.displayName, "Company")
+        XCTAssertEqual(viewModel.accountDraft.keyID, "NEWKEY1234")
+        XCTAssertEqual(viewModel.accountDraft.issuerID, "imported-issuer")
+        XCTAssertEqual(viewModel.accountDraft.teamID, "TEAM999999")
+        XCTAssertTrue(vault.savedKeys.isEmpty)
+        XCTAssertEqual(viewModel.privateKeyStatus, .missing)
+    }
 }
 
 private func makeProject(
@@ -580,6 +1039,66 @@ private func makeProject(
     )
 }
 
+private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
+    struct FetchBuildRequest: Equatable {
+        var appID: String
+        var appVersion: String?
+        var buildNumber: String?
+    }
+
+    var app: ASCApp?
+    var bundle: ASCBundleID?
+    var builds: [ASCBuild]
+    var betaGroups: [ASCBetaGroup]
+    var submission: ASCBetaReviewSubmission
+    private(set) var fetchAppBundleIDs: [String] = []
+    private(set) var fetchBuildRequests: [FetchBuildRequest] = []
+    private(set) var submittedBuildIDs: [String] = []
+
+    init(
+        app: ASCApp? = nil,
+        bundle: ASCBundleID? = nil,
+        builds: [ASCBuild] = [],
+        betaGroups: [ASCBetaGroup] = [],
+        submission: ASCBetaReviewSubmission = ASCBetaReviewSubmission(id: "submission", betaReviewState: nil)
+    ) {
+        self.app = app
+        self.bundle = bundle
+        self.builds = builds
+        self.betaGroups = betaGroups
+        self.submission = submission
+    }
+
+    func fetchApp(bundleID: String) async throws -> ASCApp? {
+        fetchAppBundleIDs.append(bundleID)
+        return app
+    }
+
+    func fetchBundleID(identifier: String) async throws -> ASCBundleID? {
+        bundle
+    }
+
+    func fetchBuilds(appID: String, appVersion: String?, buildNumber: String?) async throws -> [ASCBuild] {
+        fetchBuildRequests.append(FetchBuildRequest(appID: appID, appVersion: appVersion, buildNumber: buildNumber))
+        return builds
+    }
+
+    func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup] {
+        betaGroups
+    }
+
+    func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {}
+
+    func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup {
+        ASCBetaGroup(id: betaGroupID, name: "External", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/abc", publicLinkLimit: limit)
+    }
+
+    func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission {
+        submittedBuildIDs.append(buildID)
+        return submission
+    }
+}
+
 private final class FakeProjectProfileStore: ProjectProfileStoreProtocol {
     var loadResult: [ProjectProfile]
     var savedProfiles: [ProjectProfile] = []
@@ -600,6 +1119,7 @@ private final class FakeProjectProfileStore: ProjectProfileStoreProtocol {
 
 private final class FakeProjectScanner: ProjectScanning {
     var result: ProjectScanResult
+    private(set) var scannedPaths: [String] = []
 
     init(result: ProjectScanResult = ProjectScanResult(
         projectPath: URL(fileURLWithPath: "/tmp/Default"),
@@ -616,7 +1136,8 @@ private final class FakeProjectScanner: ProjectScanning {
     }
 
     func scan(projectPath: URL) async throws -> ProjectScanResult {
-        result
+        scannedPaths.append(projectPath.path)
+        return result
     }
 }
 
@@ -640,16 +1161,54 @@ private final class FakeConfigurationCheckEngine: ConfigurationCheckEngineProtoc
 
 private final class FakeUploadJobRunner: UploadJobRunning {
     var events: [UploadEvent]
+    var error: Error?
     private(set) var receivedProjects: [ProjectProfile] = []
     private(set) var receivedAccounts: [AppleAccountProfile] = []
 
-    init(events: [UploadEvent] = []) {
+    init(events: [UploadEvent] = [], error: Error? = nil) {
         self.events = events
+        self.error = error
     }
 
     func runLocalUpload(project: ProjectProfile, account: AppleAccountProfile) async throws -> [UploadEvent] {
         receivedProjects.append(project)
         receivedAccounts.append(account)
+        if let error {
+            throw error
+        }
+        return events
+    }
+}
+
+private final class SuspendingUploadJobRunner: UploadJobRunning {
+    var events: [UploadEvent]
+    private var started = false
+    private var startContinuation: CheckedContinuation<Void, Never>?
+    private var finishContinuation: CheckedContinuation<Void, Never>?
+
+    init(events: [UploadEvent]) {
+        self.events = events
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { continuation in
+            startContinuation = continuation
+        }
+    }
+
+    func finish() {
+        finishContinuation?.resume()
+        finishContinuation = nil
+    }
+
+    func runLocalUpload(project: ProjectProfile, account: AppleAccountProfile) async throws -> [UploadEvent] {
+        started = true
+        startContinuation?.resume()
+        startContinuation = nil
+        await withCheckedContinuation { continuation in
+            finishContinuation = continuation
+        }
         return events
     }
 }
@@ -704,6 +1263,7 @@ private final class FakeAppleAccountProfileStore: AppleAccountProfileStoreProtoc
 
     func save(_ profiles: [AppleAccountProfile]) throws {
         savedProfiles = profiles
+        loadResult = profiles
     }
 }
 
@@ -728,4 +1288,8 @@ private final class FakeCredentialVault: CredentialVault {
     func deletePrivateKey(for accountID: UUID) throws {
         savedKeys.removeValue(forKey: accountID)
     }
+}
+
+private enum TestError: Error {
+    case unavailable
 }

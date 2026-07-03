@@ -100,6 +100,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var checkResults: [CheckResult]
     @Published public var uploadState: UploadJobState
     @Published public var uploadEvents: [UploadEvent]
+    @Published public var betaReviewState: BetaReviewSubmissionState
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
     @Published public private(set) var projectMutationSummary: [String]
 
@@ -109,7 +110,9 @@ public final class AppViewModel: ObservableObject {
     private let scanner: ProjectScanning
     private let checkEngine: ConfigurationCheckEngineProtocol
     private let uploadRunner: UploadJobRunning
+    private let appStoreConnectClient: AppStoreConnectClientProtocol?
     private let projectMutator: ProjectMutating
+    private let jwtSigner: AppStoreConnectJWTSigner
     private var appliedProjectSettingsByID: [UUID: AppliedProjectSettings]
     private var lastCheckContext: CheckContext?
 
@@ -120,6 +123,7 @@ public final class AppViewModel: ObservableObject {
         scanner: ProjectScanning? = nil,
         checkEngine: ConfigurationCheckEngineProtocol? = nil,
         uploadRunner: UploadJobRunning? = nil,
+        appStoreConnectClient: AppStoreConnectClientProtocol? = nil,
         projectMutator: ProjectMutating? = nil,
         projects: [ProjectProfile] = [],
         accountProfiles: [AppleAccountProfile] = [],
@@ -136,7 +140,9 @@ public final class AppViewModel: ObservableObject {
             commandBuilder: UploadCommandBuilder(),
             credentialVault: credentialVault
         )
+        self.appStoreConnectClient = appStoreConnectClient
         self.projectMutator = projectMutator ?? ProjectMutator(backupRoot: Self.defaultBackupRoot())
+        self.jwtSigner = AppStoreConnectJWTSigner()
         self.projects = projects
         self.selectedProjectID = projects.first?.id
         self.accountProfiles = accountProfiles
@@ -145,6 +151,7 @@ public final class AppViewModel: ObservableObject {
         self.checkResults = []
         self.uploadState = .idle
         self.uploadEvents = []
+        self.betaReviewState = .idle
         self.privateKeyStatus = .missing
         self.projectMutationSummary = []
         self.appliedProjectSettingsByID = Self.appliedSettingsIndex(for: projects, treatMissingBaselineAsCurrent: true)
@@ -180,7 +187,75 @@ public final class AppViewModel: ObservableObject {
         !projectMutationSummary.isEmpty
     }
 
+    public var isOperationRunning: Bool {
+        if case .running = uploadState {
+            return true
+        }
+        if case .running = betaReviewState {
+            return true
+        }
+        return false
+    }
+
+    public var isUploadInProgress: Bool {
+        if case let .running(step) = uploadState {
+            return step != .checkBundleAndApp
+        }
+        return false
+    }
+
+    public var autoCheckTrigger: String {
+        guard let project = selectedProject, let account = accountProfile else { return "not-ready" }
+        guard privateKeyStatus == .saved else { return "not-ready" }
+        guard project.bundleID?.isEmpty == false else { return "not-ready" }
+        return [
+            project.id.uuidString,
+            project.projectPath,
+            project.workspacePath ?? "",
+            project.projectFilePath ?? "",
+            project.scheme ?? "",
+            project.configuration,
+            project.bundleID ?? "",
+            project.version ?? "",
+            project.buildNumber ?? "",
+            project.teamID ?? "",
+            account.id.uuidString,
+            account.keyID,
+            account.issuerID,
+            account.teamID ?? ""
+        ].joined(separator: "|")
+    }
+
+    public var canSubmitLatestBuildForBetaReview: Bool {
+        guard !isOperationRunning else { return false }
+        return canQueryLatestBuildTestFlightStatus
+    }
+
+    public var canQueryLatestBuildTestFlightStatus: Bool {
+        guard let project = selectedProject, accountProfile != nil else { return false }
+        return project.bundleID?.isEmpty == false &&
+            project.version?.isEmpty == false &&
+            project.buildNumber?.isEmpty == false
+    }
+
+    public var latestBuildStatusTrigger: String {
+        guard let project = selectedProject, let account = accountProfile else { return "not-ready" }
+        guard project.bundleID?.isEmpty == false,
+              project.version?.isEmpty == false,
+              project.buildNumber?.isEmpty == false else {
+            return "not-ready"
+        }
+        return [
+            project.id.uuidString,
+            project.bundleID ?? "",
+            project.version ?? "",
+            project.buildNumber ?? "",
+            account.id.uuidString
+        ].joined(separator: "|")
+    }
+
     public func loadProjects() throws {
+        guard !isOperationRunning else { return }
         let loadedProjects = try store.load()
         let loadedAccounts = try accountStore.load()
         let previousSelection = selectedProjectID
@@ -203,6 +278,7 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func selectProject(_ id: UUID) {
+        guard !isOperationRunning else { return }
         guard projects.contains(where: { $0.id == id }) else { return }
         selectedProjectID = id
         invalidateChecks()
@@ -210,13 +286,45 @@ public final class AppViewModel: ObservableObject {
         refreshProjectMutationState()
     }
 
+    public func deleteProject(_ id: UUID) {
+        deleteProjects([id])
+    }
+
+    public func deleteProjects(_ ids: Set<UUID>) {
+        guard !isOperationRunning else { return }
+        guard !ids.isEmpty else { return }
+        let firstDeletedIndex = projects.firstIndex(where: { ids.contains($0.id) })
+        guard firstDeletedIndex != nil else { return }
+        let deletedSelectedProject = selectedProjectID.map(ids.contains) ?? false
+
+        projects.removeAll { project in
+            ids.contains(project.id)
+        }
+        ids.forEach { appliedProjectSettingsByID.removeValue(forKey: $0) }
+
+        if deletedSelectedProject {
+            if let firstDeletedIndex, projects.indices.contains(firstDeletedIndex) {
+                selectedProjectID = projects[firstDeletedIndex].id
+            } else {
+                selectedProjectID = projects.last?.id
+            }
+            invalidateChecks()
+            hydrateAccountStateFromSelectedProject()
+            refreshProjectMutationState()
+        }
+
+        persistState()
+    }
+
     public func addProject(_ project: ProjectProfile) {
+        guard !isOperationRunning else { return }
         projects.append(project)
         appliedProjectSettingsByID[project.id] = AppliedProjectSettings(project: project)
         selectedProjectID = project.id
         invalidateChecks()
         hydrateAccountStateFromSelectedProject()
         refreshProjectMutationState()
+        persistState()
     }
 
     public func addProject(named name: String = "New Project", projectPath: String = "") {
@@ -238,7 +346,25 @@ public final class AppViewModel: ObservableObject {
         addProject(project)
     }
 
+    public func addProjectFromDirectory(_ directoryURL: URL) async throws {
+        guard !isOperationRunning else { return }
+        let scanResult = try await scanner.scan(projectPath: directoryURL)
+        let scannedProject = scanResult.toProjectProfile()
+        await MainActor.run {
+            guard !isOperationRunning else { return }
+            upsertProject(scannedProject, replacingSelectedProject: false)
+            if let selectedProject {
+                appliedProjectSettingsByID[selectedProject.id] = AppliedProjectSettings(project: selectedProject)
+            }
+            invalidateChecks()
+            hydrateAccountStateFromSelectedProject()
+            refreshProjectMutationState()
+            persistState()
+        }
+    }
+
     public func updateAccountDraft(displayName: String, keyID: String, issuerID: String, teamID: String?) {
+        guard !isOperationRunning else { return }
         let existingID = accountProfile?.id ?? accountDraft.id ?? selectedProject?.selectedAccountID ?? UUID()
         accountDraft = AppleAccountDraft(
             id: existingID,
@@ -253,23 +379,37 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func selectAccountProfile(_ accountID: UUID?) {
-        mutateSelectedProject { $0.selectedAccountID = accountID }
+        guard !isOperationRunning else { return }
+        let shouldInvalidate = selectedProject?.selectedAccountID != accountID
+        mutateSelectedProject(invalidateChecks: shouldInvalidate) { $0.selectedAccountID = accountID }
 
         guard let accountID, let storedProfile = accountProfiles.first(where: { $0.id == accountID }) else {
             accountDraft = AppleAccountDraft()
             accountProfile = nil
-            invalidateChecks()
+            if shouldInvalidate {
+                invalidateChecks()
+            }
             refreshPrivateKeyStatus()
             return
         }
 
         accountDraft = AppleAccountDraft(profile: storedProfile)
         accountProfile = storedProfile
-        invalidateChecks()
+        if shouldInvalidate {
+            invalidateChecks()
+        }
         refreshPrivateKeyStatus()
     }
 
+    public func updateAutoLinkExternalGroupsAfterBetaApproval(_ value: Bool) {
+        guard !isOperationRunning else { return }
+        mutateSelectedProject(invalidateChecks: false) { project in
+            project.autoLinkExternalGroupsAfterBetaApproval = value
+        }
+    }
+
     public func saveAccountProfile() {
+        guard !isOperationRunning else { return }
         let workingAccountID = ensureWorkingAccountID()
         let lastVerifiedAt = preservedLastVerifiedAt(for: workingAccountID)
         guard let profile = accountDraft.toProfile(lastVerifiedAt: lastVerifiedAt) else {
@@ -285,17 +425,39 @@ public final class AppViewModel: ObservableObject {
 
         accountDraft = AppleAccountDraft(profile: profile)
         accountProfile = profile
-        mutateSelectedProject { $0.selectedAccountID = profile.id }
+        mutateSelectedProject(invalidateChecks: false) { $0.selectedAccountID = profile.id }
         refreshPrivateKeyStatus()
+        persistState(message: "Failed to save Apple account.")
     }
 
     public func importPrivateKey(from url: URL) throws {
-        let data = try Data(contentsOf: url)
+        guard !isOperationRunning else { return }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            privateKeyStatus = .failed
+            uploadState = .failed(message: "Failed to read the App Store Connect private key file.")
+            throw error
+        }
         let pem = String(decoding: data, as: UTF8.self)
         try importPrivateKeyPEM(pem)
     }
 
+    public func importAppleAccountMetadata(from url: URL) throws {
+        guard !isOperationRunning else { return }
+        let metadata = try AppleAccountMetadataImporter().importMetadata(from: url)
+        applyAppleAccountMetadata(metadata)
+    }
+
+    public func importAppleAccountMetadataText(_ text: String) throws {
+        guard !isOperationRunning else { return }
+        let metadata = try AppleAccountMetadataImporter.parse(text)
+        applyAppleAccountMetadata(metadata)
+    }
+
     public func importPrivateKeyPEM(_ privateKeyPEM: String) throws {
+        guard !isOperationRunning else { return }
         let normalizedPEM = privateKeyPEM.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalizedPEM.contains("BEGIN PRIVATE KEY"), normalizedPEM.contains("END PRIVATE KEY") else {
             privateKeyStatus = .failed
@@ -322,50 +484,65 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func updateSelectedProjectName(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.name = value }
     }
 
     public func updateSelectedProjectPath(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.projectPath = value }
     }
 
     public func updateSelectedProjectBundleID(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.bundleID = Self.normalized(value) }
     }
 
     public func updateSelectedProjectVersion(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.version = Self.normalized(value) }
     }
 
     public func updateSelectedProjectBuildNumber(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.buildNumber = Self.normalized(value) }
     }
 
     public func updateSelectedProjectTeamID(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.teamID = Self.normalized(value) }
     }
 
     public func updateSelectedProjectScheme(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.scheme = Self.normalized(value) }
     }
 
     public func updateSelectedProjectConfiguration(_ value: String) {
+        guard !isOperationRunning else { return }
         mutateSelectedProject { $0.configuration = value.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     public func scanProject(atPath path: String) async throws {
+        guard !isOperationRunning else { return }
+        let nameOverride = await MainActor.run { Self.rescanNameOverride(for: selectedProject, scanningPath: path) }
         let scanResult = try await scanner.scan(projectPath: URL(fileURLWithPath: path))
-        let scannedProject = scanResult.toProjectProfile(nameOverride: selectedProject?.name)
-        upsertProject(scannedProject)
-        if let selectedProject {
-            appliedProjectSettingsByID[selectedProject.id] = AppliedProjectSettings(project: selectedProject)
+        let scannedProject = scanResult.toProjectProfile(nameOverride: nameOverride)
+        await MainActor.run {
+            guard !isOperationRunning else { return }
+            upsertProject(scannedProject, replacingSelectedProject: true)
+            if let selectedProject {
+                appliedProjectSettingsByID[selectedProject.id] = AppliedProjectSettings(project: selectedProject)
+            }
+            invalidateChecks()
+            hydrateAccountStateFromSelectedProject()
+            refreshProjectMutationState()
+            persistState()
         }
-        invalidateChecks()
-        hydrateAccountStateFromSelectedProject()
-        refreshProjectMutationState()
     }
 
     public func runChecks() async {
+        guard !isOperationRunning else { return }
         guard let project = selectedProject else {
             lastCheckContext = nil
             uploadState = .failed(message: "Select a project before running checks.")
@@ -399,7 +576,16 @@ public final class AppViewModel: ObservableObject {
         uploadState = results.blocksUpload ? .failed(message: "Configuration checks found blocking issues.") : .idle
     }
 
+    public func runChecksAutomaticallyIfNeeded() async {
+        guard autoCheckTrigger != "not-ready" else { return }
+        guard !isOperationRunning else { return }
+        guard !hasUnappliedProjectChanges else { return }
+        guard !checksAreCurrent else { return }
+        await runChecks()
+    }
+
     public func startUpload(confirmedYellowIssues: Bool = false) async {
+        guard !isOperationRunning else { return }
         guard let project = selectedProject else {
             uploadState = .failed(message: "Select a project before starting upload.")
             return
@@ -412,25 +598,32 @@ public final class AppViewModel: ObservableObject {
             uploadState = .failed(message: "Apply project changes before uploading.")
             return
         }
-        guard checksAreCurrent else {
-            uploadState = .failed(message: "Run configuration checks for the current project and Apple account before uploading.")
+
+        uploadEvents = []
+        betaReviewState = .idle
+        uploadState = .running(step: .checkBundleAndApp)
+
+        guard let currentCheckContext else {
+            uploadState = .failed(message: "Select or enter an Apple account before uploading.")
             return
         }
-        if checkResults.blocksUpload {
+
+        let results = await checkEngine.run(project: project, account: account)
+        checkResults = results
+        lastCheckContext = currentCheckContext
+        let checksPassed = !results.blocksUpload
+        uploadEvents.append(UploadEvent(step: .checkBundleAndApp, message: Self.checkResultsConsoleMessage(results), succeeded: checksPassed))
+
+        guard checksPassed else {
             uploadState = .failed(message: "Upload blocked by configuration issues. Resolve red checks before uploading.")
-            return
-        }
-        if hasYellowChecks && !confirmedYellowIssues {
-            uploadState = .failed(message: "Upload requires confirmation for yellow configuration issues.")
             return
         }
 
         uploadState = .running(step: .archive)
-        uploadEvents = []
 
         do {
             let events = try await uploadRunner.runLocalUpload(project: project, account: account)
-            uploadEvents = events
+            uploadEvents.append(contentsOf: events)
             uploadState = .succeeded(message: "Upload finished successfully.")
             applyLastUploadSummary(success: true, message: events.last?.message ?? "Upload finished successfully.")
         } catch {
@@ -439,7 +632,95 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    public func submitLatestBuildForBetaReview() async {
+        guard !isOperationRunning else { return }
+        guard let project = selectedProject else {
+            betaReviewState = .failed(message: "Select a project before submitting TestFlight review.")
+            return
+        }
+        guard let account = accountProfile else {
+            betaReviewState = .failed(message: "Select an Apple account before submitting TestFlight review.")
+            return
+        }
+        guard let bundleID = project.bundleID, !bundleID.isEmpty,
+              let version = project.version, !version.isEmpty,
+              let buildNumber = project.buildNumber, !buildNumber.isEmpty else {
+            betaReviewState = .failed(message: "Bundle ID, version, and build number are required before submitting review.")
+            return
+        }
+
+        betaReviewState = .running
+        do {
+            let client = appStoreConnectClient(for: account)
+            guard let app = try await client.fetchApp(bundleID: bundleID) else {
+                betaReviewState = .failed(message: "App Store Connect app not found for \(bundleID).")
+                return
+            }
+            guard let build = try await client.fetchBuilds(appID: app.id, appVersion: version, buildNumber: buildNumber).first else {
+                betaReviewState = .failed(message: "Uploaded build \(version) (\(buildNumber)) was not found in App Store Connect yet.")
+                return
+            }
+            if let processingState = build.processingState, processingState != "VALID" {
+                betaReviewState = .failed(message: "Build \(version) (\(buildNumber)) is \(processingState). Wait until Apple processing is VALID.")
+                return
+            }
+
+            let submission = try await client.submitBetaReview(buildID: build.id)
+            let stateText = Self.readableBetaReviewState(submission.betaReviewState) ?? "Submitted"
+            betaReviewState = .succeeded(message: "Submitted to TestFlight review. State: \(stateText)")
+        } catch {
+            betaReviewState = .failed(message: "Submit to TestFlight review failed: \(error)")
+        }
+    }
+
+    public func refreshLatestBuildTestFlightStatusIfNeeded() async {
+        guard latestBuildStatusTrigger != "not-ready" else { return }
+        guard !isOperationRunning else { return }
+        await refreshLatestBuildTestFlightStatus()
+    }
+
+    public func refreshLatestBuildTestFlightStatus() async {
+        guard !isOperationRunning else { return }
+        guard let project = selectedProject else {
+            betaReviewState = .failed(message: "Select a project before refreshing TestFlight status.")
+            return
+        }
+        guard let account = accountProfile else {
+            betaReviewState = .failed(message: "Select an Apple account before refreshing TestFlight status.")
+            return
+        }
+        guard let bundleID = project.bundleID, !bundleID.isEmpty,
+              let version = project.version, !version.isEmpty,
+              let buildNumber = project.buildNumber, !buildNumber.isEmpty else {
+            betaReviewState = .failed(message: "Bundle ID, version, and build number are required before refreshing status.")
+            return
+        }
+
+        betaReviewState = .running
+        do {
+            let client = appStoreConnectClient(for: account)
+            guard let app = try await client.fetchApp(bundleID: bundleID) else {
+                betaReviewState = .failed(message: "App Store Connect app not found for \(bundleID).")
+                return
+            }
+            guard let build = try await client.fetchBuilds(appID: app.id, appVersion: version, buildNumber: buildNumber).first else {
+                betaReviewState = .failed(message: "Uploaded build \(version) (\(buildNumber)) was not found in App Store Connect yet.")
+                return
+            }
+
+            let reviewState = Self.readableBetaReviewState(build.betaReviewState) ?? "Not Submitted"
+            if let processingState = build.processingState, processingState != "VALID" {
+                betaReviewState = .succeeded(message: "TestFlight status: \(reviewState). Build processing: \(processingState)")
+            } else {
+                betaReviewState = .succeeded(message: "TestFlight status: \(reviewState)")
+            }
+        } catch {
+            betaReviewState = .failed(message: "Refresh TestFlight status failed: \(error)")
+        }
+    }
+
     public func applyProjectChanges() throws {
+        guard !isOperationRunning else { return }
         guard let project = selectedProject else {
             uploadState = .failed(message: "Select a project before applying project changes.")
             return
@@ -463,21 +744,24 @@ public final class AppViewModel: ObservableObject {
         appliedProjectSettingsByID[project.id] = AppliedProjectSettings(project: project)
         invalidateChecks()
         refreshProjectMutationState()
+        persistState()
     }
 
-    private func upsertProject(_ project: ProjectProfile) {
-        if let selectedProjectID, let index = projects.firstIndex(where: { $0.id == selectedProjectID }) {
+    private func upsertProject(_ project: ProjectProfile, replacingSelectedProject: Bool) {
+        if replacingSelectedProject, let selectedProjectID, let index = projects.firstIndex(where: { $0.id == selectedProjectID }) {
             var updated = project
             updated.id = selectedProjectID
             updated.name = projects[index].name.isEmpty ? project.name : projects[index].name
             updated.selectedAccountID = projects[index].selectedAccountID
             updated.lastUpload = projects[index].lastUpload
+            updated.autoLinkExternalGroupsAfterBetaApproval = projects[index].autoLinkExternalGroupsAfterBetaApproval
             projects[index] = updated
         } else if let index = projects.firstIndex(where: { $0.projectPath == project.projectPath }) {
             var updated = project
             updated.id = projects[index].id
             updated.selectedAccountID = projects[index].selectedAccountID
             updated.lastUpload = projects[index].lastUpload
+            updated.autoLinkExternalGroupsAfterBetaApproval = projects[index].autoLinkExternalGroupsAfterBetaApproval
             projects[index] = updated
             selectedProjectID = updated.id
         } else {
@@ -488,13 +772,25 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    private func applyAppleAccountMetadata(_ metadata: AppleAccountMetadata) {
+        updateAccountDraft(
+            displayName: accountDraft.displayName,
+            keyID: metadata.keyID,
+            issuerID: metadata.issuerID,
+            teamID: metadata.teamID ?? accountDraft.teamID
+        )
+    }
+
     private func mutateSelectedProject(invalidateChecks: Bool = true, _ mutate: (inout ProjectProfile) -> Void) {
         guard let selectedProjectID, let index = projects.firstIndex(where: { $0.id == selectedProjectID }) else { return }
+        let previousProject = projects[index]
         mutate(&projects[index])
+        guard projects[index] != previousProject else { return }
         if invalidateChecks {
             self.invalidateChecks()
         }
         refreshProjectMutationState()
+        persistState()
     }
 
     private var currentCheckContext: CheckContext? {
@@ -515,6 +811,51 @@ public final class AppViewModel: ObservableObject {
         checkResults = []
         uploadEvents = []
         uploadState = .idle
+        betaReviewState = .idle
+    }
+
+    private static func checkResultsConsoleMessage(_ results: [CheckResult]) -> String {
+        guard !results.isEmpty else {
+            return "[OK] Configuration checks completed with no issues."
+        }
+
+        return results.map { result in
+            let prefix: String
+            switch result.severity {
+            case .green:
+                prefix = "[OK]"
+            case .yellow:
+                prefix = "[WARN]"
+            case .red:
+                prefix = "[BLOCKED]"
+            }
+            return "\(prefix) \(result.title)\n\(result.message)"
+        }.joined(separator: "\n\n")
+    }
+
+    private static func readableBetaReviewState(_ state: String?) -> String? {
+        guard let state else { return nil }
+        switch state {
+        case "WAITING_FOR_REVIEW":
+            return "Waiting for Review"
+        case "IN_REVIEW":
+            return "In Review"
+        case "APPROVED":
+            return "Approved"
+        case "REJECTED":
+            return "Rejected"
+        default:
+            return state
+        }
+    }
+
+    private func persistState(message: String = "Failed to save changes.") {
+        do {
+            try accountStore.save(accountProfiles)
+            try store.save(persistedProjects())
+        } catch {
+            uploadState = .failed(message: "\(message) \(error)")
+        }
     }
 
     private func refreshProjectMutationState() {
@@ -590,6 +931,17 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    private func appStoreConnectClient(for account: AppleAccountProfile) -> AppStoreConnectClientProtocol {
+        if let appStoreConnectClient {
+            return appStoreConnectClient
+        }
+
+        return AppStoreConnectClient { [credentialVault, jwtSigner] in
+            let privateKey = try credentialVault.privateKey(for: account.id)
+            return try jwtSigner.makeJWT(account: account, privateKeyPEM: privateKey)
+        }
+    }
+
     private func applyLastUploadSummary(success: Bool, message: String) {
         mutateSelectedProject(invalidateChecks: false) { project in
             project.lastUpload = UploadSummary(
@@ -605,6 +957,16 @@ public final class AppViewModel: ObservableObject {
     private static func normalized(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func rescanNameOverride(for project: ProjectProfile?, scanningPath: String) -> String? {
+        guard let project else { return nil }
+        let currentFolderName = URL(fileURLWithPath: project.projectPath).lastPathComponent
+        let scanningFolderName = URL(fileURLWithPath: scanningPath).lastPathComponent
+        if project.name == currentFolderName || project.name == scanningFolderName {
+            return nil
+        }
+        return project.name
     }
 
     private static func defaultBackupRoot() -> URL {
@@ -686,7 +1048,6 @@ private struct ProjectSnapshot: Equatable {
     let version: String?
     let buildNumber: String?
     let teamID: String?
-    let selectedAccountID: UUID?
 
     init(project: ProjectProfile) {
         self.id = project.id
@@ -700,7 +1061,6 @@ private struct ProjectSnapshot: Equatable {
         self.version = project.version
         self.buildNumber = project.buildNumber
         self.teamID = project.teamID
-        self.selectedAccountID = project.selectedAccountID
     }
 }
 

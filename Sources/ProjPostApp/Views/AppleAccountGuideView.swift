@@ -4,6 +4,8 @@ import SwiftUI
 
 struct AppleAccountGuideView: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var language = AppleAccountGuideContent.defaultLanguage
+    @State private var previewedScreenshot: AppleAccountGuideScreenshot?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,10 +14,10 @@ struct AppleAccountGuideView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     linkRow
-                    ForEach(AppleAccountGuideContent.sections) { section in
+                    ForEach(AppleAccountGuideContent.sections(for: language)) { section in
                         guideSection(section)
                     }
-                    ForEach(AppleAccountGuideContent.screenshots) { screenshot in
+                    ForEach(AppleAccountGuideContent.screenshots(for: language)) { screenshot in
                         guideScreenshot(screenshot)
                     }
                 }
@@ -23,18 +25,31 @@ struct AppleAccountGuideView: View {
             }
         }
         .frame(minWidth: 760, idealWidth: 860, minHeight: 620, idealHeight: 720)
+        .sheet(item: $previewedScreenshot) { screenshot in
+            screenshotPreview(screenshot)
+        }
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Apple Account Guide")
+                Text(AppleAccountGuideContent.title(for: language))
                     .font(.title2.weight(.semibold))
-                Text("Find the .p8 key, Key ID, Issuer ID, and Team ID for JJPost.")
+                Text(AppleAccountGuideContent.subtitle(for: language))
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Done") {
+            Picker("Language", selection: $language) {
+                ForEach(AppleAccountGuideLanguage.allCases) { option in
+                    Text(AppleAccountGuideContent.languageDisplayName(option))
+                        .tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 160)
+
+            Button(AppleAccountGuideContent.doneButtonTitle(for: language)) {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
@@ -44,8 +59,8 @@ struct AppleAccountGuideView: View {
 
     private var linkRow: some View {
         HStack(spacing: 12) {
-            Link("Open App Store Connect API", destination: AppleAccountGuideContent.appStoreConnectURL)
-            Link("Open Apple Developer Account", destination: AppleAccountGuideContent.developerMembershipURL)
+            Link(AppleAccountGuideContent.appStoreConnectLinkTitle(for: language), destination: AppleAccountGuideContent.appStoreConnectURL)
+            Link(AppleAccountGuideContent.developerAccountLinkTitle(for: language), destination: AppleAccountGuideContent.developerMembershipURL)
             Spacer()
         }
         .buttonStyle(.bordered)
@@ -74,14 +89,24 @@ struct AppleAccountGuideView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let image = loadImage(screenshot) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(.quaternary)
-                    )
+                Button {
+                    previewedScreenshot = screenshot
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(.quaternary)
+                            )
+                        Label(AppleAccountGuideContent.openImageTitle(for: language), systemImage: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
             } else {
                 Label("Screenshot resource missing: \(screenshot.resourceName)", systemImage: "photo")
                     .foregroundStyle(.orange)
@@ -90,13 +115,47 @@ struct AppleAccountGuideView: View {
     }
 
     private func loadImage(_ screenshot: AppleAccountGuideScreenshot) -> NSImage? {
-        guard let url = Bundle.module.url(
+        let url = Bundle.module.url(
             forResource: screenshot.resourceName,
             withExtension: "png",
             subdirectory: screenshot.subdirectory
-        ) else {
+        ) ?? Bundle.module.url(
+            forResource: screenshot.resourceName,
+            withExtension: "png"
+        )
+        guard let url else {
             return nil
         }
         return NSImage(contentsOf: url)
+    }
+
+    private func screenshotPreview(_ screenshot: AppleAccountGuideScreenshot) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(screenshot.caption)
+                    .font(.headline)
+                Spacer()
+                Button(AppleAccountGuideContent.doneButtonTitle(for: language)) {
+                    previewedScreenshot = nil
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+            Divider()
+            ScrollView([.horizontal, .vertical]) {
+                if let image = loadImage(screenshot) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 1200, maxHeight: 760)
+                        .padding(20)
+                } else {
+                    Label("Screenshot resource missing: \(screenshot.resourceName)", systemImage: "photo")
+                        .foregroundStyle(.orange)
+                        .padding(40)
+                }
+            }
+        }
+        .frame(minWidth: 900, minHeight: 620)
     }
 }

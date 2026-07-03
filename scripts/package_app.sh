@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 APP_NAME="JJPost"
+APP_VERSION="${APP_VERSION:-1.0.0}"
 EXECUTABLE_NAME="ProjPostApp"
 BUILD_DIR="$ROOT_DIR/.build/$CONFIGURATION"
 DIST_DIR="$ROOT_DIR/dist"
@@ -53,7 +54,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>

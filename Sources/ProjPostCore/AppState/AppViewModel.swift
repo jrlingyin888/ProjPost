@@ -419,6 +419,21 @@ public final class AppViewModel: ObservableObject {
         guard !isOperationRunning else { return }
         mutateSelectedProject(invalidateChecks: false) { project in
             project.autoLinkExternalGroupsAfterBetaApproval = value
+            if !value {
+                project.autoLinkExternalGroupIDsAfterBetaApproval.removeAll()
+            }
+        }
+    }
+
+    public func updateAutoLinkExternalGroup(_ groupID: String, isEnabled: Bool) {
+        guard !isOperationRunning else { return }
+        mutateSelectedProject(invalidateChecks: false) { project in
+            project.autoLinkExternalGroupsAfterBetaApproval = false
+            if isEnabled {
+                project.autoLinkExternalGroupIDsAfterBetaApproval.insert(groupID)
+            } else {
+                project.autoLinkExternalGroupIDsAfterBetaApproval.remove(groupID)
+            }
         }
     }
 
@@ -717,11 +732,12 @@ public final class AppViewModel: ObservableObject {
             let snapshot = loaded.snapshot
             var finalSnapshot = snapshot
             var linkFailureCount = 0
-            if project.autoLinkExternalGroupsAfterBetaApproval,
+            let autoGroupIDs = project.autoLinkExternalGroupIDsAfterBetaApproval
+            if !autoGroupIDs.isEmpty,
                snapshot.betaReviewState == "APPROVED",
                !snapshot.externalGroups.isEmpty {
                 testFlightDistributionState = .linking(snapshot)
-                let result = await linkExternalGroups(snapshot: snapshot, client: loaded.client)
+                let result = await linkExternalGroups(snapshot: snapshot, client: loaded.client, targetGroupIDs: autoGroupIDs)
                 finalSnapshot = result.snapshot
                 linkFailureCount = result.failureCount
             }
@@ -742,6 +758,14 @@ public final class AppViewModel: ObservableObject {
     }
 
     public func linkExternalGroupsForLatestBuild() async {
+        await linkExternalGroupsForLatestBuild(targetGroupID: nil)
+    }
+
+    public func linkExternalGroupForLatestBuild(groupID: String) async {
+        await linkExternalGroupsForLatestBuild(targetGroupID: groupID)
+    }
+
+    private func linkExternalGroupsForLatestBuild(targetGroupID: String?) async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
             testFlightDistributionState = .failed(message: "Select a project before linking external groups.")
@@ -755,10 +779,11 @@ public final class AppViewModel: ObservableObject {
         testFlightDistributionState = .linking(currentDistributionSnapshot)
         do {
             let loaded = try await loadLatestBuildDistribution(project: project, account: account)
-            let linkedSnapshot = await linkExternalGroups(snapshot: loaded.snapshot, client: loaded.client)
+            let targetGroupIDs = targetGroupID.map { Set([$0]) }
+            let linkedSnapshot = await linkExternalGroups(snapshot: loaded.snapshot, client: loaded.client, targetGroupIDs: targetGroupIDs)
             testFlightDistributionState = .loaded(linkedSnapshot.snapshot)
             betaReviewState = linkedSnapshot.failureCount == 0
-                ? .succeeded(message: "External TestFlight groups linked.")
+                ? .succeeded(message: targetGroupID == nil ? "External TestFlight groups linked." : "External TestFlight group linked.")
                 : .failed(message: "Linked external groups with \(linkedSnapshot.failureCount) failure.")
         } catch {
             let message = Self.testFlightDistributionErrorMessage(error)
@@ -923,13 +948,18 @@ public final class AppViewModel: ObservableObject {
 
     private func linkExternalGroups(
         snapshot: TestFlightDistributionSnapshot,
-        client: AppStoreConnectClientProtocol
+        client: AppStoreConnectClientProtocol,
+        targetGroupIDs: Set<String>? = nil
     ) async -> (snapshot: TestFlightDistributionSnapshot, failureCount: Int) {
         var updated = snapshot
         var failureCount = 0
         var linkedGroups: [TestFlightDistributionGroup] = []
 
         for group in snapshot.externalGroups {
+            guard targetGroupIDs?.contains(group.id) ?? true else {
+                linkedGroups.append(group)
+                continue
+            }
             var updatedGroup = group
             do {
                 if !group.isCurrentBuildAssociated {

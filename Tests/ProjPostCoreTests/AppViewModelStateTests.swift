@@ -58,13 +58,14 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(accountStore.savedProfiles, [])
     }
 
-    func testNewProjectsDefaultExternalGroupAutomationOn() {
+    func testNewProjectsDefaultExternalGroupAutomationOff() {
         let project = makeProject(name: "Demo")
 
-        XCTAssertTrue(project.autoLinkExternalGroupsAfterBetaApproval)
+        XCTAssertFalse(project.autoLinkExternalGroupsAfterBetaApproval)
+        XCTAssertEqual(project.autoLinkExternalGroupIDsAfterBetaApproval, [])
     }
 
-    func testTogglingExternalGroupAutomationPersistsWithProject() {
+    func testTogglingExternalGroupAutomationPersistsGroupSelectionWithProject() {
         let project = makeProject(name: "Demo")
         let store = FakeProjectProfileStore()
         let viewModel = AppViewModel(
@@ -77,10 +78,13 @@ final class AppViewModelStateTests: XCTestCase {
             projects: [project]
         )
 
-        viewModel.updateAutoLinkExternalGroupsAfterBetaApproval(false)
+        viewModel.updateAutoLinkExternalGroup("external-a", isEnabled: true)
+        viewModel.updateAutoLinkExternalGroup("external-b", isEnabled: true)
+        viewModel.updateAutoLinkExternalGroup("external-a", isEnabled: false)
 
         XCTAssertEqual(viewModel.selectedProject?.autoLinkExternalGroupsAfterBetaApproval, false)
-        XCTAssertEqual(store.savedProfiles.first?.autoLinkExternalGroupsAfterBetaApproval, false)
+        XCTAssertEqual(viewModel.selectedProject?.autoLinkExternalGroupIDsAfterBetaApproval, ["external-b"])
+        XCTAssertEqual(store.savedProfiles.first?.autoLinkExternalGroupIDsAfterBetaApproval, ["external-b"])
     }
 
     func testSaveAccountProfilePersistsAccountAndSelectedProjectReferenceImmediately() throws {
@@ -370,7 +374,7 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(snapshot.externalGroups.first?.publicLink, "https://testflight.apple.com/join/a")
     }
 
-    func testApprovedBuildAutoLinksExternalGroupsAndEnablesPublicLinks() async {
+    func testApprovedBuildAutoLinksSelectedExternalGroupsAndEnablesPublicLinks() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
             displayName: "Company",
@@ -379,7 +383,8 @@ final class AppViewModelStateTests: XCTestCase {
             teamID: "TEAM123",
             lastVerifiedAt: nil
         )
-        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.autoLinkExternalGroupIDsAfterBetaApproval = ["external-a"]
         let allGroups = [
             ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
             ASCBetaGroup(id: "external-a", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: 100),
@@ -456,7 +461,7 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(snapshot.externalGroups.first?.isCurrentBuildAssociated, false)
     }
 
-    func testManualLinkExternalGroupsLinksAllExternalGroupsOnly() async {
+    func testManualLinkExternalGroupLinksSelectedExternalGroupOnly() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
             displayName: "Company",
@@ -487,7 +492,7 @@ final class AppViewModelStateTests: XCTestCase {
             accountProfiles: [account]
         )
 
-        await viewModel.linkExternalGroupsForLatestBuild()
+        await viewModel.linkExternalGroupForLatestBuild(groupID: "external")
 
         XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external"])
         XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external"])
@@ -527,14 +532,14 @@ final class AppViewModelStateTests: XCTestCase {
             accountProfiles: [account]
         )
 
-        await viewModel.linkExternalGroupsForLatestBuild()
+        await viewModel.linkExternalGroupForLatestBuild(groupID: "external-b")
 
-        XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external-a", "external-b"])
-        XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external-a", "external-b"])
+        XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external-b"])
+        XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external-b"])
         guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
             return XCTFail("Expected loaded snapshot")
         }
-        XCTAssertEqual(snapshot.externalGroups.first(where: { $0.id == "external-a" })?.operationState, .linked)
+        XCTAssertEqual(snapshot.externalGroups.first(where: { $0.id == "external-a" })?.operationState, .idle)
         if case let .failed(message) = snapshot.externalGroups.first(where: { $0.id == "external-b" })?.operationState {
             XCTAssertTrue(message.contains("unavailable"))
         } else {

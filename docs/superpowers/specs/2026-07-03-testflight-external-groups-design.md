@@ -1,5 +1,7 @@
 # TestFlight External Groups Automation Design
 
+> Superseded note: The all-external-groups automation described in this original design has been replaced by per-external-group controls. New projects default to no automatic external-group linking. Each external group now has its own manual `Link Build` action and `Auto after approval` setting.
+
 ## Goal
 
 Show TestFlight external testing readiness in ProjPost and let users distribute the latest approved TestFlight build without opening App Store Connect.

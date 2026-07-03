@@ -306,18 +306,8 @@ struct ProjectDetailView: View {
         }
     }
 
-    private var autoLinkExternalGroupsBinding: Binding<Bool> {
-        Binding(
-            get: { viewModel.selectedProject?.autoLinkExternalGroupsAfterBetaApproval ?? true },
-            set: { viewModel.updateAutoLinkExternalGroupsAfterBetaApproval($0) }
-        )
-    }
-
     private var distributionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Auto link approved build to external groups", isOn: autoLinkExternalGroupsBinding)
-                .disabled(viewModel.isOperationRunning)
-
             switch viewModel.testFlightDistributionState {
             case .idle:
                 placeholderRow(title: "TestFlight Distribution", value: "Refresh TF Status to load tester groups.")
@@ -358,15 +348,6 @@ struct ProjectDetailView: View {
                     value: "\(snapshot.version) (\(snapshot.buildNumber)) · \(snapshot.betaReviewStateText)"
                 )
                 Spacer()
-                Button {
-                    Task {
-                        await viewModel.linkExternalGroupsForLatestBuild()
-                    }
-                } label: {
-                    Label("Link External Groups", systemImage: "link")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isOperationRunning || snapshot.externalGroups.isEmpty)
             }
 
             if !snapshot.internalGroups.isEmpty {
@@ -405,6 +386,27 @@ struct ProjectDetailView: View {
                     .foregroundStyle(groupStatusColor(group))
             }
 
+            if !group.isInternalGroup {
+                HStack(spacing: 10) {
+                    Button {
+                        Task {
+                            await viewModel.linkExternalGroupForLatestBuild(groupID: group.id)
+                        }
+                    } label: {
+                        Label("Link Build", systemImage: "link")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isOperationRunning || (group.isCurrentBuildAssociated && group.publicLinkEnabled))
+
+                    Toggle("Auto after approval", isOn: autoLinkExternalGroupBinding(groupID: group.id))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                        .disabled(viewModel.isOperationRunning)
+
+                    Spacer()
+                }
+            }
+
             if let publicLink = group.publicLink, !publicLink.isEmpty {
                 Text(publicLink)
                     .font(.caption.monospaced())
@@ -430,6 +432,17 @@ struct ProjectDetailView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func autoLinkExternalGroupBinding(groupID: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                viewModel.selectedProject?.autoLinkExternalGroupIDsAfterBetaApproval.contains(groupID) ?? false
+            },
+            set: { isEnabled in
+                viewModel.updateAutoLinkExternalGroup(groupID, isEnabled: isEnabled)
+            }
+        )
     }
 
     private func groupStatusText(_ group: TestFlightDistributionGroup) -> String {
@@ -655,9 +668,24 @@ struct ProjectDetailView: View {
     }
 
     private var betaReviewStatusColor: Color {
+        if let betaReviewStatusText {
+            if betaReviewStatusText.localizedCaseInsensitiveContains("Approved") {
+                return .green
+            }
+            if betaReviewStatusText.localizedCaseInsensitiveContains("Rejected") {
+                return .red
+            }
+            if betaReviewStatusText.localizedCaseInsensitiveContains("Waiting for Review") ||
+                betaReviewStatusText.localizedCaseInsensitiveContains("In Review") ||
+                betaReviewStatusText.localizedCaseInsensitiveContains("Submitted") ||
+                betaReviewStatusText.localizedCaseInsensitiveContains("Updating") {
+                return .yellow
+            }
+        }
+
         switch viewModel.betaReviewState {
         case .failed:
-            return .orange
+            return .red
         case .succeeded:
             return .green
         default:

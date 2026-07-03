@@ -73,8 +73,9 @@
 - [ ] 确认 `Internal Testing` 显示内部测试组
 - [ ] 确认 `External Testing` 显示所有外部测试组
 - [ ] 确认两个外部测试组显示各自 public link 或 pending 状态
-- [ ] 保持 `Auto link approved build to external groups` 打开，等待/刷新到 `Approved` 后确认 app 自动关联所有外部组
-- [ ] 关闭自动开关，点击 `Link External Groups`，确认无需打开网页即可关联外部测试组并启用 public link
+- [ ] 默认不勾选任何外部组的 `Auto after approval`
+- [ ] 只勾选一个外部组的 `Auto after approval`，等待/刷新到 `Approved` 后确认 app 只自动关联该组
+- [ ] 点击某个外部组的 `Link Build`，确认无需打开网页即可只关联该组并启用 public link
 - [ ] 确认失败的外部组会单独显示错误，成功的外部组链接仍保留
 
 ## 安全与本地数据检查

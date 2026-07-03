@@ -21,6 +21,7 @@ struct ProjectDetailView: View {
     @State private var showAccountFileImporter = false
     @State private var activeAccountFileImport: AccountFileImport?
     @State private var isEditingSavedAccount = false
+    @State private var showAppleAccountGuide = false
 
     var body: some View {
         ScrollView {
@@ -48,6 +49,9 @@ struct ProjectDetailView: View {
             case nil:
                 break
             }
+        }
+        .sheet(isPresented: $showAppleAccountGuide) {
+            AppleAccountGuideView()
         }
     }
 
@@ -230,7 +234,16 @@ struct ProjectDetailView: View {
                 }
             }
         } label: {
-            Label("Apple Account", systemImage: "person.crop.square")
+            HStack(spacing: 8) {
+                Label("Apple Account", systemImage: "person.crop.square")
+                Button {
+                    showAppleAccountGuide = true
+                } label: {
+                    Label("Guide", systemImage: "questionmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("How to find .p8, Key ID, Issuer ID, and Team ID")
+            }
         }
         .disabled(viewModel.isOperationRunning)
     }

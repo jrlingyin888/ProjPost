@@ -26,7 +26,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "ProjPostApp",
-            dependencies: ["ProjPostCore"]
+            dependencies: ["ProjPostCore"],
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "ProjPostCoreTests",

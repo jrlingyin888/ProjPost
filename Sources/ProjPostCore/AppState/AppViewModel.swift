@@ -46,6 +46,12 @@ public enum AppViewModelError: Error, Equatable {
     case invalidPrivateKeyPEM
 }
 
+private enum TestFlightDistributionError: Error, Equatable {
+    case missingProjectFields
+    case appNotFound(String)
+    case buildNotFound(version: String, buildNumber: String)
+}
+
 public struct AppleAccountDraft: Equatable {
     public var id: UUID?
     public var displayName: String
@@ -101,6 +107,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var uploadState: UploadJobState
     @Published public var uploadEvents: [UploadEvent]
     @Published public var betaReviewState: BetaReviewSubmissionState
+    @Published public var testFlightDistributionState: TestFlightDistributionState
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
     @Published public private(set) var projectMutationSummary: [String]
 
@@ -152,6 +159,7 @@ public final class AppViewModel: ObservableObject {
         self.uploadState = .idle
         self.uploadEvents = []
         self.betaReviewState = .idle
+        self.testFlightDistributionState = .idle
         self.privateKeyStatus = .missing
         self.projectMutationSummary = []
         self.appliedProjectSettingsByID = Self.appliedSettingsIndex(for: projects, treatMissingBaselineAsCurrent: true)
@@ -192,6 +200,12 @@ public final class AppViewModel: ObservableObject {
             return true
         }
         if case .running = betaReviewState {
+            return true
+        }
+        if case .loading = testFlightDistributionState {
+            return true
+        }
+        if case .linking = testFlightDistributionState {
             return true
         }
         return false
@@ -697,25 +711,20 @@ public final class AppViewModel: ObservableObject {
         }
 
         betaReviewState = .running
+        testFlightDistributionState = .loading
         do {
-            let client = appStoreConnectClient(for: account)
-            guard let app = try await client.fetchApp(bundleID: bundleID) else {
-                betaReviewState = .failed(message: "App Store Connect app not found for \(bundleID).")
-                return
-            }
-            guard let build = try await client.fetchBuilds(appID: app.id, appVersion: version, buildNumber: buildNumber).first else {
-                betaReviewState = .failed(message: "Uploaded build \(version) (\(buildNumber)) was not found in App Store Connect yet.")
-                return
-            }
-
-            let reviewState = Self.readableBetaReviewState(build.betaReviewState) ?? "Not Submitted"
-            if let processingState = build.processingState, processingState != "VALID" {
-                betaReviewState = .succeeded(message: "TestFlight status: \(reviewState). Build processing: \(processingState)")
+            let loaded = try await loadLatestBuildDistribution(project: project, account: account)
+            let snapshot = loaded.snapshot
+            if let processingState = snapshot.processingState, processingState != "VALID" {
+                betaReviewState = .succeeded(message: "TestFlight status: \(snapshot.betaReviewStateText). Build processing: \(processingState)")
             } else {
-                betaReviewState = .succeeded(message: "TestFlight status: \(reviewState)")
+                betaReviewState = .succeeded(message: "TestFlight status: \(snapshot.betaReviewStateText)")
             }
+            testFlightDistributionState = .loaded(snapshot)
         } catch {
-            betaReviewState = .failed(message: "Refresh TestFlight status failed: \(error)")
+            let message = Self.testFlightDistributionErrorMessage(error)
+            betaReviewState = .failed(message: message)
+            testFlightDistributionState = .failed(message: message)
         }
     }
 
@@ -812,6 +821,7 @@ public final class AppViewModel: ObservableObject {
         uploadEvents = []
         uploadState = .idle
         betaReviewState = .idle
+        testFlightDistributionState = .idle
     }
 
     private static func checkResultsConsoleMessage(_ results: [CheckResult]) -> String {
@@ -846,6 +856,74 @@ public final class AppViewModel: ObservableObject {
             return "Rejected"
         default:
             return state
+        }
+    }
+
+    private static func distributionGroup(from group: ASCBetaGroup, associatedGroupIDs: Set<String>) -> TestFlightDistributionGroup {
+        TestFlightDistributionGroup(
+            id: group.id,
+            name: group.name,
+            isInternalGroup: group.isInternalGroup,
+            isCurrentBuildAssociated: associatedGroupIDs.contains(group.id),
+            publicLinkEnabled: group.publicLinkEnabled,
+            publicLink: group.publicLink,
+            publicLinkLimit: group.publicLinkLimit
+        )
+    }
+
+    private func loadLatestBuildDistribution(
+        project: ProjectProfile,
+        account: AppleAccountProfile
+    ) async throws -> (snapshot: TestFlightDistributionSnapshot, build: ASCBuild, client: AppStoreConnectClientProtocol) {
+        guard let bundleID = project.bundleID, !bundleID.isEmpty,
+              let version = project.version, !version.isEmpty,
+              let buildNumber = project.buildNumber, !buildNumber.isEmpty else {
+            throw TestFlightDistributionError.missingProjectFields
+        }
+
+        let client = appStoreConnectClient(for: account)
+        guard let app = try await client.fetchApp(bundleID: bundleID) else {
+            throw TestFlightDistributionError.appNotFound(bundleID)
+        }
+        guard let build = try await client.fetchBuilds(appID: app.id, appVersion: version, buildNumber: buildNumber).first else {
+            throw TestFlightDistributionError.buildNotFound(version: version, buildNumber: buildNumber)
+        }
+
+        let allGroups = try await client.fetchBetaGroups(appID: app.id)
+        let associatedGroups = try await client.fetchBetaGroupsForBuild(buildID: build.id)
+        let associatedIDs = Set(associatedGroups.map(\.id))
+        let groups = allGroups.map { Self.distributionGroup(from: $0, associatedGroupIDs: associatedIDs) }
+        let internalGroups = groups.filter(\.isInternalGroup).sorted { $0.name < $1.name }
+        let externalGroups = groups.filter { !$0.isInternalGroup }.sorted { $0.name < $1.name }
+        let reviewStateText = Self.readableBetaReviewState(build.betaReviewState) ?? "Not Submitted"
+
+        return (
+            TestFlightDistributionSnapshot(
+                appID: app.id,
+                buildID: build.id,
+                version: version,
+                buildNumber: buildNumber,
+                processingState: build.processingState,
+                betaReviewState: build.betaReviewState,
+                betaReviewStateText: reviewStateText,
+                internalGroups: internalGroups,
+                externalGroups: externalGroups
+            ),
+            build,
+            client
+        )
+    }
+
+    private static func testFlightDistributionErrorMessage(_ error: Error) -> String {
+        switch error {
+        case TestFlightDistributionError.missingProjectFields:
+            return "Bundle ID, version, and build number are required before refreshing TestFlight distribution."
+        case let TestFlightDistributionError.appNotFound(bundleID):
+            return "App Store Connect app not found for \(bundleID)."
+        case let TestFlightDistributionError.buildNotFound(version, buildNumber):
+            return "Uploaded build \(version) (\(buildNumber)) was not found in App Store Connect yet."
+        default:
+            return "Refresh TestFlight distribution failed: \(error)"
         }
     }
 

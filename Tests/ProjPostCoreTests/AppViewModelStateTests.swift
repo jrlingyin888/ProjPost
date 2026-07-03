@@ -279,6 +279,54 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.betaReviewState, .succeeded(message: "TestFlight status: In Review"))
     }
 
+    func testRefreshLatestBuildTestFlightStatusLoadsDistributionGroupsWithoutClearingConsole() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let allGroups = [
+            ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
+            ASCBetaGroup(id: "external-a", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/a", publicLinkLimit: 100),
+            ASCBetaGroup(id: "external-b", name: "外部测试 B", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
+        ]
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "WAITING_FOR_REVIEW")],
+            betaGroups: allGroups,
+            associatedBetaGroups: [allGroups[0], allGroups[1]]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+        viewModel.uploadEvents = [UploadEvent(step: .upload, message: "Previous upload log", succeeded: true)]
+
+        await viewModel.refreshLatestBuildTestFlightStatus()
+
+        XCTAssertEqual(viewModel.uploadEvents, [UploadEvent(step: .upload, message: "Previous upload log", succeeded: true)])
+        XCTAssertEqual(appStoreConnect.fetchBetaGroupsForBuildIDs, ["build-123"])
+        guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
+            return XCTFail("Expected loaded distribution snapshot")
+        }
+        XCTAssertEqual(snapshot.betaReviewStateText, "Waiting for Review")
+        XCTAssertEqual(snapshot.internalGroups.map(\.name), ["内部测试"])
+        XCTAssertEqual(snapshot.externalGroups.map(\.name), ["外部测试 A", "外部测试 B"])
+        XCTAssertEqual(snapshot.externalGroups.map(\.isCurrentBuildAssociated), [true, false])
+        XCTAssertEqual(snapshot.externalGroups.first?.publicLink, "https://testflight.apple.com/join/a")
+    }
+
     func testAutomaticChecksRunOnceWhenReady() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,

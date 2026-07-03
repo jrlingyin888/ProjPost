@@ -31,6 +31,42 @@ final class AppStoreConnectClientTests: XCTestCase {
         ])
     }
 
+    func testFetchBetaGroupsForBuildMapsAssociatedGroups() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":[{"id":"internal","type":"betaGroups","attributes":{"name":"内部测试","isInternalGroup":true,"publicLinkEnabled":false}},{"id":"external","type":"betaGroups","attributes":{"name":"外部测试 A","isInternalGroup":false,"publicLinkEnabled":true,"publicLink":"https://testflight.apple.com/join/abc","publicLinkLimit":50}}]}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let groups = try await client.fetchBetaGroupsForBuild(buildID: "build-123")
+
+        XCTAssertEqual(groups, [
+            ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
+            ASCBetaGroup(id: "external", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/abc", publicLinkLimit: 50)
+        ])
+        XCTAssertEqual(transport.requests.first?.path, "/v1/builds/build-123/betaGroups")
+    }
+
+    func testFetchBuildsFiltersByAppVersionAndBuildNumber() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 200, body: #"{"data":[{"id":"build1","type":"builds","attributes":{"version":"1","processingState":"VALID","betaReviewState":"WAITING_FOR_REVIEW"}}]}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let builds = try await client.fetchBuilds(appID: "123", appVersion: "1.2.6", buildNumber: "1")
+
+        XCTAssertEqual(builds, [
+            ASCBuild(id: "build1", version: "1", processingState: "VALID", betaReviewState: "WAITING_FOR_REVIEW")
+        ])
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.path, "/v1/builds")
+        XCTAssertEqual(request.queryItems["filter[app]"], "123")
+        XCTAssertEqual(request.queryItems["filter[preReleaseVersion.version]"], "1.2.6")
+        XCTAssertEqual(request.queryItems["filter[version]"], "1")
+    }
+
     func testAddBuildSucceedsOnNoContentResponse() async throws {
         let transport = StubASCTransport(responses: [
             ASCTransportResponse(statusCode: 204, body: "")
@@ -46,5 +82,27 @@ final class AppStoreConnectClientTests: XCTestCase {
         XCTAssertEqual(request.headers["Authorization"], "Bearer token")
         XCTAssertEqual(request.headers["Content-Type"], "application/json")
         XCTAssertEqual(String(data: try XCTUnwrap(request.body), encoding: .utf8), #"{"data":[{"id":"build-123","type":"builds"}]}"#)
+    }
+
+    func testSubmitBetaReviewCreatesSubmissionForBuild() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 201, body: #"{"data":{"id":"submission-123","type":"betaAppReviewSubmissions","attributes":{"betaReviewState":"IN_REVIEW"}}}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let submission = try await client.submitBetaReview(buildID: "build-123")
+
+        XCTAssertEqual(submission.id, "submission-123")
+        XCTAssertEqual(submission.betaReviewState, "IN_REVIEW")
+        XCTAssertEqual(transport.requests.count, 1)
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/v1/betaAppReviewSubmissions")
+        XCTAssertEqual(request.headers["Authorization"], "Bearer token")
+        XCTAssertEqual(request.headers["Content-Type"], "application/json")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"relationships":{"build":{"data":{"id":"build-123","type":"builds"}}},"type":"betaAppReviewSubmissions"}}"#
+        )
     }
 }

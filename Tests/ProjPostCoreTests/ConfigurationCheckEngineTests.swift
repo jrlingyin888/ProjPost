@@ -13,7 +13,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
         XCTAssertEqual(results.first { $0.id == "bundle-id" }?.severity, .red)
     }
 
-    func testExistingBuildNumberIsRed() async {
+    func testExistingBuildNumberForSameVersionIsRed() async {
         let fakeASC = FakeASCClient(
             app: ASCApp(id: "app1", name: "Demo", bundleID: "com.example.demo"),
             bundle: ASCBundleID(id: "bundle1", identifier: "com.example.demo", platform: "IOS"),
@@ -27,7 +27,27 @@ final class ConfigurationCheckEngineTests: XCTestCase {
 
         XCTAssertEqual(fakeASC.fetchBuildsAppID, "app1")
         XCTAssertEqual(fakeASC.fetchBuildsBuildNumber, "7")
+        XCTAssertEqual(fakeASC.fetchBuildsAppVersion, "1.0.0")
         XCTAssertEqual(results.first { $0.id == "build-number" }?.severity, .red)
+    }
+
+    func testExistingBuildNumberForDifferentVersionDoesNotBlockUpload() async {
+        let fakeASC = FakeASCClient(
+            app: ASCApp(id: "app1", name: "Demo", bundleID: "com.example.demo"),
+            bundle: ASCBundleID(id: "bundle1", identifier: "com.example.demo", platform: "IOS"),
+            builds: []
+        )
+        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(), appStoreConnect: fakeASC)
+        let project = ProjectProfile(name: "Demo", projectPath: "/tmp/Demo", workspacePath: nil, projectFilePath: nil, scheme: "Demo", configuration: "Release", bundleID: "com.example.demo", version: "1.2.6", buildNumber: "1", teamID: "TEAM123", selectedAccountID: nil, lastUpload: nil)
+        let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+
+        let results = await engine.run(project: project, account: account)
+
+        XCTAssertEqual(fakeASC.fetchBuildsAppID, "app1")
+        XCTAssertEqual(fakeASC.fetchBuildsBuildNumber, "1")
+        XCTAssertEqual(fakeASC.fetchBuildsAppVersion, "1.2.6")
+        XCTAssertFalse(results.blocksUpload)
+        XCTAssertEqual(results.first { $0.id == "build-number" }?.severity, .green)
     }
 
     func testASCFailureEmitsRedAPIResultAndBlocksUpload() async {
@@ -54,9 +74,11 @@ final class ConfigurationCheckEngineTests: XCTestCase {
 
         let successResult = await successChecker.checkXcode()
 
-        XCTAssertEqual(successRunner.commands.count, 1)
+        XCTAssertEqual(successRunner.commands.count, 2)
         XCTAssertEqual(successRunner.commands.first?.executableURL.path, "/usr/bin/xcodebuild")
         XCTAssertEqual(successRunner.commands.first?.arguments, ["-version"])
+        XCTAssertEqual(successRunner.commands.last?.executableURL.path, "/usr/bin/env")
+        XCTAssertEqual(successRunner.commands.last?.arguments, ["rsync", "--version"])
         XCTAssertEqual(successResult.severity, .green)
 
         let failureRunner = FakeCommandRunner(result: CommandResult(exitCode: 1, stdout: "", stderr: "xcodebuild: command not found"))
@@ -66,6 +88,22 @@ final class ConfigurationCheckEngineTests: XCTestCase {
 
         XCTAssertEqual(failureRunner.commands.count, 1)
         XCTAssertEqual(failureResult.severity, .red)
+    }
+
+    func testXcodeEnvironmentCheckerReturnsRedWhenRsyncIsUnavailable() async {
+        let runner = QueueCommandRunner(results: [
+            CommandResult(exitCode: 0, stdout: "Xcode 26.6\nBuild version 17F113\n", stderr: ""),
+            CommandResult(exitCode: 127, stdout: "", stderr: "env: rsync: No such file or directory")
+        ])
+        let checker = XcodeEnvironmentChecker(commandRunner: runner)
+
+        let result = await checker.checkXcode()
+
+        XCTAssertEqual(result.id, "rsync")
+        XCTAssertEqual(result.severity, .red)
+        XCTAssertEqual(result.title, "rsync 不可用")
+        XCTAssertEqual(runner.commands.map { $0.executableURL.path }, ["/usr/bin/xcodebuild", "/usr/bin/env"])
+        XCTAssertEqual(runner.commands.last?.arguments, ["rsync", "--version"])
     }
 }
 
@@ -82,6 +120,7 @@ private final class FakeASCClient: AppStoreConnectClientProtocol {
     let fetchBuildsError: Error?
     private(set) var fetchBuildsAppID: String?
     private(set) var fetchBuildsBuildNumber: String?
+    private(set) var fetchBuildsAppVersion: String?
 
     init(app: ASCApp?, bundle: ASCBundleID?, builds: [ASCBuild], fetchBuildsError: Error? = nil) {
         self.app = app
@@ -92,18 +131,24 @@ private final class FakeASCClient: AppStoreConnectClientProtocol {
 
     func fetchApp(bundleID: String) async throws -> ASCApp? { app }
     func fetchBundleID(identifier: String) async throws -> ASCBundleID? { bundle }
-    func fetchBuilds(appID: String, buildNumber: String?) async throws -> [ASCBuild] {
+    func fetchBuilds(appID: String, appVersion: String?, buildNumber: String?) async throws -> [ASCBuild] {
         fetchBuildsAppID = appID
         fetchBuildsBuildNumber = buildNumber
+        fetchBuildsAppVersion = appVersion
         if let fetchBuildsError {
             throw fetchBuildsError
         }
         return builds
     }
     func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup] { [] }
+    func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup] { [] }
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {}
     func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup {
         ASCBetaGroup(id: betaGroupID, name: "外部公开测试", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/abc", publicLinkLimit: limit)
+    }
+
+    func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission {
+        ASCBetaReviewSubmission(id: "submission-\(buildID)", betaReviewState: "IN_REVIEW")
     }
 }
 
@@ -123,4 +168,18 @@ private final class FakeCommandRunner: CommandRunning {
 
 private enum TestError: Error {
     case unavailable
+}
+
+private final class QueueCommandRunner: CommandRunning {
+    private var results: [CommandResult]
+    private(set) var commands: [Command] = []
+
+    init(results: [CommandResult]) {
+        self.results = results
+    }
+
+    func run(_ command: Command) async throws -> CommandResult {
+        commands.append(command)
+        return results.removeFirst()
+    }
 }

@@ -31,11 +31,13 @@ public struct ASCBuild: Equatable {
     public var id: String
     public var version: String
     public var processingState: String?
+    public var betaReviewState: String?
 
-    public init(id: String, version: String, processingState: String?) {
+    public init(id: String, version: String, processingState: String?, betaReviewState: String? = nil) {
         self.id = id
         self.version = version
         self.processingState = processingState
+        self.betaReviewState = betaReviewState
     }
 }
 
@@ -64,13 +66,25 @@ public struct ASCBetaGroup: Equatable {
     }
 }
 
+public struct ASCBetaReviewSubmission: Equatable {
+    public var id: String
+    public var betaReviewState: String?
+
+    public init(id: String, betaReviewState: String?) {
+        self.id = id
+        self.betaReviewState = betaReviewState
+    }
+}
+
 public protocol AppStoreConnectClientProtocol {
     func fetchApp(bundleID: String) async throws -> ASCApp?
     func fetchBundleID(identifier: String) async throws -> ASCBundleID?
-    func fetchBuilds(appID: String, buildNumber: String?) async throws -> [ASCBuild]
+    func fetchBuilds(appID: String, appVersion: String?, buildNumber: String?) async throws -> [ASCBuild]
     func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup]
+    func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup]
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws
     func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup
+    func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission
 }
 
 public struct ASCRequest: Equatable {
@@ -130,8 +144,11 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
         return try dataArray(from: json).first.map(Self.mapBundleID)
     }
 
-    public func fetchBuilds(appID: String, buildNumber: String?) async throws -> [ASCBuild] {
+    public func fetchBuilds(appID: String, appVersion: String?, buildNumber: String?) async throws -> [ASCBuild] {
         var query = ["filter[app]": appID]
+        if let appVersion, !appVersion.isEmpty {
+            query["filter[preReleaseVersion.version]"] = appVersion
+        }
         if let buildNumber {
             query["filter[version]"] = buildNumber
         }
@@ -141,6 +158,11 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
 
     public func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup] {
         let json = try await get(path: "/v1/betaGroups", query: ["filter[app]": appID])
+        return try dataArray(from: json).map(Self.mapBetaGroup)
+    }
+
+    public func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup] {
+        let json = try await get(path: "/v1/builds/\(buildID)/betaGroups", query: [:])
         return try dataArray(from: json).map(Self.mapBetaGroup)
     }
 
@@ -176,6 +198,27 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
             throw AppStoreConnectError.malformedResponse
         }
         return Self.mapBetaGroup(data)
+    }
+
+    public func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission {
+        let body: [String: Any] = [
+            "data": [
+                "type": "betaAppReviewSubmissions",
+                "relationships": [
+                    "build": [
+                        "data": [
+                            "type": "builds",
+                            "id": buildID
+                        ]
+                    ]
+                ]
+            ]
+        ]
+        let json = try await send(method: "POST", path: "/v1/betaAppReviewSubmissions", query: [:], jsonBody: body)
+        guard let data = json["data"] as? [String: Any] else {
+            throw AppStoreConnectError.malformedResponse
+        }
+        return Self.mapBetaReviewSubmission(data)
     }
 
     private func get(path: String, query: [String: String]) async throws -> [String: Any] {
@@ -251,7 +294,8 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
         return ASCBuild(
             id: item["id"] as? String ?? "",
             version: attributes?["version"] as? String ?? "",
-            processingState: attributes?["processingState"] as? String
+            processingState: attributes?["processingState"] as? String,
+            betaReviewState: attributes?["betaReviewState"] as? String
         )
     }
 
@@ -264,6 +308,14 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
             publicLinkEnabled: attributes?["publicLinkEnabled"] as? Bool ?? false,
             publicLink: attributes?["publicLink"] as? String,
             publicLinkLimit: Self.intValue(attributes?["publicLinkLimit"])
+        )
+    }
+
+    private static func mapBetaReviewSubmission(_ item: [String: Any]) -> ASCBetaReviewSubmission {
+        let attributes = item["attributes"] as? [String: Any]
+        return ASCBetaReviewSubmission(
+            id: item["id"] as? String ?? "",
+            betaReviewState: attributes?["betaReviewState"] as? String
         )
     }
 

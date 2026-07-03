@@ -1050,9 +1050,11 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var bundle: ASCBundleID?
     var builds: [ASCBuild]
     var betaGroups: [ASCBetaGroup]
+    var associatedBetaGroups: [ASCBetaGroup]
     var submission: ASCBetaReviewSubmission
     private(set) var fetchAppBundleIDs: [String] = []
     private(set) var fetchBuildRequests: [FetchBuildRequest] = []
+    private(set) var fetchBetaGroupsForBuildIDs: [String] = []
     private(set) var submittedBuildIDs: [String] = []
 
     init(
@@ -1060,12 +1062,14 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         bundle: ASCBundleID? = nil,
         builds: [ASCBuild] = [],
         betaGroups: [ASCBetaGroup] = [],
+        associatedBetaGroups: [ASCBetaGroup] = [],
         submission: ASCBetaReviewSubmission = ASCBetaReviewSubmission(id: "submission", betaReviewState: nil)
     ) {
         self.app = app
         self.bundle = bundle
         self.builds = builds
         self.betaGroups = betaGroups
+        self.associatedBetaGroups = associatedBetaGroups
         self.submission = submission
     }
 
@@ -1085,6 +1089,11 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
 
     func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup] {
         betaGroups
+    }
+
+    func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup] {
+        fetchBetaGroupsForBuildIDs.append(buildID)
+        return associatedBetaGroups
     }
 
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {}

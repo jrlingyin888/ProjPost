@@ -973,8 +973,13 @@ public final class AppViewModel: ObservableObject {
         }
 
         let allGroups = try await client.fetchBetaGroups(appID: app.id)
-        let associatedGroups = try await client.fetchBetaGroupsForBuild(buildID: build.id)
-        let associatedIDs = Set(associatedGroups.map(\.id))
+        var associatedIDs = Set<String>()
+        for group in allGroups {
+            let groupBuilds = try await client.fetchBuildsForBetaGroup(betaGroupID: group.id)
+            if groupBuilds.contains(where: { $0.id == build.id }) {
+                associatedIDs.insert(group.id)
+            }
+        }
         let groups = allGroups.map { Self.distributionGroup(from: $0, associatedGroupIDs: associatedIDs) }
         let internalGroups = groups.filter(\.isInternalGroup).sorted { $0.name < $1.name }
         let externalGroups = groups.filter { !$0.isInternalGroup }.sorted { $0.name < $1.name }

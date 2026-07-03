@@ -298,7 +298,10 @@ final class AppViewModelStateTests: XCTestCase {
             app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
             builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "WAITING_FOR_REVIEW")],
             betaGroups: allGroups,
-            associatedBetaGroups: [allGroups[0], allGroups[1]]
+            buildsByBetaGroupID: [
+                "internal": [ASCBuild(id: "build-123", version: "1", processingState: "VALID")],
+                "external-a": [ASCBuild(id: "build-123", version: "1", processingState: "VALID")]
+            ]
         )
         let viewModel = AppViewModel(
             store: FakeProjectProfileStore(),
@@ -316,7 +319,7 @@ final class AppViewModelStateTests: XCTestCase {
         await viewModel.refreshLatestBuildTestFlightStatus()
 
         XCTAssertEqual(viewModel.uploadEvents, [UploadEvent(step: .upload, message: "Previous upload log", succeeded: true)])
-        XCTAssertEqual(appStoreConnect.fetchBetaGroupsForBuildIDs, ["build-123"])
+        XCTAssertEqual(appStoreConnect.fetchBuildsForBetaGroupIDs, ["internal", "external-a", "external-b"])
         guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
             return XCTFail("Expected loaded distribution snapshot")
         }
@@ -346,7 +349,9 @@ final class AppViewModelStateTests: XCTestCase {
             app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
             builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
             betaGroups: allGroups,
-            associatedBetaGroups: [allGroups[2]]
+            buildsByBetaGroupID: [
+                "external-b": [ASCBuild(id: "build-123", version: "1", processingState: "VALID")]
+            ]
         )
         let viewModel = AppViewModel(
             store: FakeProjectProfileStore(),
@@ -387,7 +392,7 @@ final class AppViewModelStateTests: XCTestCase {
             app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
             builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
             betaGroups: [external],
-            associatedBetaGroups: []
+            buildsByBetaGroupID: [:]
         )
         let viewModel = AppViewModel(
             store: FakeProjectProfileStore(),
@@ -428,7 +433,7 @@ final class AppViewModelStateTests: XCTestCase {
             app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
             builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
             betaGroups: [internalGroup, externalGroup],
-            associatedBetaGroups: []
+            buildsByBetaGroupID: [:]
         )
         let viewModel = AppViewModel(
             store: FakeProjectProfileStore(),
@@ -467,7 +472,7 @@ final class AppViewModelStateTests: XCTestCase {
             app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
             builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
             betaGroups: groups,
-            associatedBetaGroups: []
+            buildsByBetaGroupID: [:]
         )
         appStoreConnect.enablePublicLinkFailuresByGroupID = ["external-b": TestError.unavailable]
         let viewModel = AppViewModel(
@@ -1269,13 +1274,13 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var bundle: ASCBundleID?
     var builds: [ASCBuild]
     var betaGroups: [ASCBetaGroup]
-    var associatedBetaGroups: [ASCBetaGroup]
+    var buildsByBetaGroupID: [String: [ASCBuild]]
     var submission: ASCBetaReviewSubmission
     var addBuildFailuresByGroupID: [String: Error] = [:]
     var enablePublicLinkFailuresByGroupID: [String: Error] = [:]
     private(set) var fetchAppBundleIDs: [String] = []
     private(set) var fetchBuildRequests: [FetchBuildRequest] = []
-    private(set) var fetchBetaGroupsForBuildIDs: [String] = []
+    private(set) var fetchBuildsForBetaGroupIDs: [String] = []
     private(set) var addedBuildsToGroups: [(buildID: String, betaGroupID: String)] = []
     private(set) var enabledPublicLinks: [(betaGroupID: String, limit: Int?)] = []
     private(set) var submittedBuildIDs: [String] = []
@@ -1285,14 +1290,14 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         bundle: ASCBundleID? = nil,
         builds: [ASCBuild] = [],
         betaGroups: [ASCBetaGroup] = [],
-        associatedBetaGroups: [ASCBetaGroup] = [],
+        buildsByBetaGroupID: [String: [ASCBuild]] = [:],
         submission: ASCBetaReviewSubmission = ASCBetaReviewSubmission(id: "submission", betaReviewState: nil)
     ) {
         self.app = app
         self.bundle = bundle
         self.builds = builds
         self.betaGroups = betaGroups
-        self.associatedBetaGroups = associatedBetaGroups
+        self.buildsByBetaGroupID = buildsByBetaGroupID
         self.submission = submission
     }
 
@@ -1314,9 +1319,9 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         betaGroups
     }
 
-    func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup] {
-        fetchBetaGroupsForBuildIDs.append(buildID)
-        return associatedBetaGroups
+    func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild] {
+        fetchBuildsForBetaGroupIDs.append(betaGroupID)
+        return buildsByBetaGroupID[betaGroupID] ?? []
     }
 
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {

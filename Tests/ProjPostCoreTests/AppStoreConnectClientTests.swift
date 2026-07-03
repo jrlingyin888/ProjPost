@@ -31,22 +31,22 @@ final class AppStoreConnectClientTests: XCTestCase {
         ])
     }
 
-    func testFetchBetaGroupsForBuildMapsAssociatedGroups() async throws {
+    func testFetchBuildsForBetaGroupMapsAssociatedBuilds() async throws {
         let transport = StubASCTransport(responses: [
             ASCTransportResponse(
                 statusCode: 200,
-                body: #"{"data":[{"id":"internal","type":"betaGroups","attributes":{"name":"内部测试","isInternalGroup":true,"publicLinkEnabled":false}},{"id":"external","type":"betaGroups","attributes":{"name":"外部测试 A","isInternalGroup":false,"publicLinkEnabled":true,"publicLink":"https://testflight.apple.com/join/abc","publicLinkLimit":50}}]}"#
+                body: #"{"data":[{"id":"build-123","type":"builds","attributes":{"version":"1","processingState":"VALID","betaReviewState":"APPROVED"}},{"id":"build-456","type":"builds","attributes":{"version":"2","processingState":"PROCESSING","betaReviewState":"WAITING_FOR_REVIEW"}}]}"#
             )
         ])
         let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
 
-        let groups = try await client.fetchBetaGroupsForBuild(buildID: "build-123")
+        let builds = try await client.fetchBuildsForBetaGroup(betaGroupID: "group-123")
 
-        XCTAssertEqual(groups, [
-            ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
-            ASCBetaGroup(id: "external", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: true, publicLink: "https://testflight.apple.com/join/abc", publicLinkLimit: 50)
+        XCTAssertEqual(builds, [
+            ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED"),
+            ASCBuild(id: "build-456", version: "2", processingState: "PROCESSING", betaReviewState: "WAITING_FOR_REVIEW")
         ])
-        XCTAssertEqual(transport.requests.first?.path, "/v1/builds/build-123/betaGroups")
+        XCTAssertEqual(transport.requests.first?.path, "/v1/betaGroups/group-123/builds")
     }
 
     func testFetchBuildsFiltersByAppVersionAndBuildNumber() async throws {

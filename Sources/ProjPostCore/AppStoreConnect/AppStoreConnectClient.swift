@@ -81,7 +81,7 @@ public protocol AppStoreConnectClientProtocol {
     func fetchBundleID(identifier: String) async throws -> ASCBundleID?
     func fetchBuilds(appID: String, appVersion: String?, buildNumber: String?) async throws -> [ASCBuild]
     func fetchBetaGroups(appID: String) async throws -> [ASCBetaGroup]
-    func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup]
+    func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild]
     func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws
     func enablePublicLink(betaGroupID: String, limit: Int?) async throws -> ASCBetaGroup
     func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission
@@ -161,9 +161,9 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
         return try dataArray(from: json).map(Self.mapBetaGroup)
     }
 
-    public func fetchBetaGroupsForBuild(buildID: String) async throws -> [ASCBetaGroup] {
-        let json = try await get(path: "/v1/builds/\(buildID)/betaGroups", query: [:])
-        return try dataArray(from: json).map(Self.mapBetaGroup)
+    public func fetchBuildsForBetaGroup(betaGroupID: String) async throws -> [ASCBuild] {
+        let json = try await get(path: "/v1/betaGroups/\(betaGroupID)/builds", query: [:])
+        return try dataArray(from: json).map(Self.mapBuild)
     }
 
     public func addBuild(_ buildID: String, toBetaGroup betaGroupID: String) async throws {

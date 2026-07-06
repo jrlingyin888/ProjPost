@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 APP_NAME="JJPost"
 APP_VERSION="${APP_VERSION:-1.0.0}"
+APPLE_TEAM_ID="${APPLE_TEAM_ID:-T46A6Q874U}"
 EXECUTABLE_NAME="ProjPostApp"
 BUILD_DIR="$ROOT_DIR/.build/$CONFIGURATION"
 DIST_DIR="$ROOT_DIR/dist"
@@ -66,14 +67,14 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 if [ -z "$SIGN_IDENTITY" ] && [ "${DISABLE_AUTO_SIGN:-0}" != "1" ]; then
-    SIGN_IDENTITY="$(
-        security find-identity -v -p codesigning 2>/dev/null \
-            | awk -F '"' '/Developer ID Application|Apple Distribution|Apple Development/ { print $2; exit }'
-    )"
+    SIGN_IDENTITY="$(APPLE_TEAM_ID="$APPLE_TEAM_ID" "$ROOT_DIR/scripts/select_signing_identity.sh")"
 fi
 
 if [ -n "$SIGN_IDENTITY" ]; then
     echo "Signing $APP_DIR with $SIGN_IDENTITY"
+    if [[ "$SIGN_IDENTITY" == Apple\ Development:* ]]; then
+        echo "Warning: Apple Development signing is suitable for local testing, not GitHub Releases distribution." >&2
+    fi
     if ! codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"; then
         echo "Warning: signing with $SIGN_IDENTITY failed; falling back to ad-hoc signing." >&2
         codesign --force --deep --sign - "$APP_DIR"

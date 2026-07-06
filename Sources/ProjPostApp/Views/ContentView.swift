@@ -15,13 +15,9 @@ struct ContentView: View {
             ProjectListView(viewModel: viewModel)
                 .navigationSplitViewColumnWidth(min: 300, ideal: 340)
         } detail: {
-            VStack(spacing: 0) {
-                appTitleHeader
-                Divider()
-                ProjectDetailView(viewModel: viewModel)
-            }
+            ProjectDetailView(viewModel: viewModel)
         }
-        .navigationTitle("")
+        .navigationTitle(ProductBranding.navigationTitleDisplay)
         .environmentObject(localizationStore)
         .onAppear {
             viewModel.updateLanguage(localizationStore.language)
@@ -52,26 +48,6 @@ struct ContentView: View {
                 Text(strings.updateAvailableMessage(currentVersion: ProductBranding.appVersion, latestVersion: release.version))
             }
         }
-    }
-
-    private var appTitleHeader: some View {
-        HStack(spacing: 8) {
-            Text(ProductBranding.displayName)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text(ProductBranding.appVersionDisplay)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(.quaternary.opacity(0.8), in: Capsule())
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .lineLimit(1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(ProductBranding.titleAccessibilityLabel)
     }
 
     private var updateAlertBinding: Binding<Bool> {

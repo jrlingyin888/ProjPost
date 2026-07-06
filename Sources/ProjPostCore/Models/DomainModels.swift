@@ -140,8 +140,13 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
     }
 
     public var statusLabel: String {
-        guard let lastUpload else { return "未配置" }
-        return lastUpload.succeeded ? "最近上传成功" : "最近上传失败"
+        statusLabel(language: .english)
+    }
+
+    public func statusLabel(language: AppLanguage) -> String {
+        let strings = AppStrings(language: language)
+        guard let lastUpload else { return strings.projectStatusNotConfigured }
+        return lastUpload.succeeded ? strings.projectStatusLastUploadSucceeded : strings.projectStatusLastUploadFailed
     }
 }
 

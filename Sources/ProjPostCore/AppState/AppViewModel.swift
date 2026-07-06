@@ -12,6 +12,13 @@ public protocol ProjectScanning {
 
 public protocol ConfigurationCheckEngineProtocol {
     func run(project: ProjectProfile, account: AppleAccountProfile) async -> [CheckResult]
+    func run(project: ProjectProfile, account: AppleAccountProfile, language: AppLanguage) async -> [CheckResult]
+}
+
+public extension ConfigurationCheckEngineProtocol {
+    func run(project: ProjectProfile, account: AppleAccountProfile, language: AppLanguage) async -> [CheckResult] {
+        await run(project: project, account: account)
+    }
 }
 
 public protocol UploadJobRunning {
@@ -108,6 +115,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var uploadEvents: [UploadEvent]
     @Published public var betaReviewState: BetaReviewSubmissionState
     @Published public var testFlightDistributionState: TestFlightDistributionState
+    @Published public var language: AppLanguage
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
     @Published public private(set) var projectMutationSummary: [String]
 
@@ -134,7 +142,8 @@ public final class AppViewModel: ObservableObject {
         projectMutator: ProjectMutating? = nil,
         projects: [ProjectProfile] = [],
         accountProfiles: [AppleAccountProfile] = [],
-        accountDraft: AppleAccountDraft = AppleAccountDraft()
+        accountDraft: AppleAccountDraft = AppleAccountDraft(),
+        language: AppLanguage = .english
     ) {
         let commandRunner = ProcessCommandRunner()
         self.store = store
@@ -160,6 +169,7 @@ public final class AppViewModel: ObservableObject {
         self.uploadEvents = []
         self.betaReviewState = .idle
         self.testFlightDistributionState = .idle
+        self.language = language
         self.privateKeyStatus = .missing
         self.projectMutationSummary = []
         self.appliedProjectSettingsByID = Self.appliedSettingsIndex(for: projects, treatMissingBaselineAsCurrent: true)
@@ -176,6 +186,17 @@ public final class AppViewModel: ObservableObject {
     public var selectedProject: ProjectProfile? {
         guard let selectedProjectID else { return nil }
         return projects.first(where: { $0.id == selectedProjectID })
+    }
+
+    private var strings: AppStrings {
+        AppStrings(language: language)
+    }
+
+    public func updateLanguage(_ language: AppLanguage) {
+        self.language = language
+        relocalizeDistributionState()
+        refreshBetaReviewStatusMessageFromSnapshot()
+        refreshProjectMutationState()
     }
 
     public var hasYellowChecks: Bool {
@@ -442,7 +463,7 @@ public final class AppViewModel: ObservableObject {
         let workingAccountID = ensureWorkingAccountID()
         let lastVerifiedAt = preservedLastVerifiedAt(for: workingAccountID)
         guard let profile = accountDraft.toProfile(lastVerifiedAt: lastVerifiedAt) else {
-            uploadState = .failed(message: "Complete the Apple account fields before saving.")
+            uploadState = .failed(message: strings.completeAppleAccountFieldsBeforeSaving)
             return
         }
 
@@ -456,7 +477,7 @@ public final class AppViewModel: ObservableObject {
         accountProfile = profile
         mutateSelectedProject(invalidateChecks: false) { $0.selectedAccountID = profile.id }
         refreshPrivateKeyStatus()
-        persistState(message: "Failed to save Apple account.")
+        persistState(message: strings.failedToSaveAppleAccount)
     }
 
     public func importPrivateKey(from url: URL) throws {
@@ -466,7 +487,7 @@ public final class AppViewModel: ObservableObject {
             data = try Data(contentsOf: url)
         } catch {
             privateKeyStatus = .failed
-            uploadState = .failed(message: "Failed to read the App Store Connect private key file.")
+            uploadState = .failed(message: strings.failedToReadPrivateKeyFile)
             throw error
         }
         let pem = String(decoding: data, as: UTF8.self)
@@ -490,14 +511,14 @@ public final class AppViewModel: ObservableObject {
         let normalizedPEM = privateKeyPEM.trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalizedPEM.contains("BEGIN PRIVATE KEY"), normalizedPEM.contains("END PRIVATE KEY") else {
             privateKeyStatus = .failed
-            uploadState = .failed(message: "Imported file does not contain a valid App Store Connect private key.")
+            uploadState = .failed(message: strings.invalidPrivateKeyFile)
             throw AppViewModelError.invalidPrivateKeyPEM
         }
 
         let workingAccountID = ensureWorkingAccountID()
         guard accountDraft.toProfile(lastVerifiedAt: preservedLastVerifiedAt(for: workingAccountID)) != nil else {
             privateKeyStatus = .failed
-            uploadState = .failed(message: "Complete the Apple account fields before importing a private key.")
+            uploadState = .failed(message: strings.completeAppleAccountBeforeImportingPrivateKey)
             throw AppViewModelError.incompleteAppleAccount
         }
 
@@ -507,7 +528,7 @@ public final class AppViewModel: ObservableObject {
             invalidateChecks()
         } catch {
             privateKeyStatus = .failed
-            uploadState = .failed(message: "Failed to save the App Store Connect private key.")
+            uploadState = .failed(message: strings.failedToSavePrivateKey)
             throw error
         }
     }
@@ -574,35 +595,35 @@ public final class AppViewModel: ObservableObject {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
             lastCheckContext = nil
-            uploadState = .failed(message: "Select a project before running checks.")
+            uploadState = .failed(message: strings.selectProjectBeforeRunningChecks)
             checkResults = []
             return
         }
         guard !hasUnappliedProjectChanges else {
             lastCheckContext = nil
-            uploadState = .failed(message: "Apply project changes before running checks.")
+            uploadState = .failed(message: strings.applyProjectChangesBeforeRunningChecks)
             checkResults = []
             return
         }
         guard let account = accountProfile else {
             lastCheckContext = nil
-            uploadState = .failed(message: "Select or enter an Apple account before running checks.")
+            uploadState = .failed(message: strings.selectOrEnterAppleAccountBeforeRunningChecks)
             checkResults = []
             return
         }
 
         guard let currentCheckContext else {
             lastCheckContext = nil
-            uploadState = .failed(message: "Select or enter an Apple account before running checks.")
+            uploadState = .failed(message: strings.selectOrEnterAppleAccountBeforeRunningChecks)
             checkResults = []
             return
         }
 
         uploadState = .running(step: .checkBundleAndApp)
-        let results = await checkEngine.run(project: project, account: account)
+        let results = await checkEngine.run(project: project, account: account, language: language)
         checkResults = results
         lastCheckContext = currentCheckContext
-        uploadState = results.blocksUpload ? .failed(message: "Configuration checks found blocking issues.") : .idle
+        uploadState = results.blocksUpload ? .failed(message: strings.configurationChecksFoundBlockingIssues) : .idle
     }
 
     public func runChecksAutomaticallyIfNeeded() async {
@@ -616,15 +637,15 @@ public final class AppViewModel: ObservableObject {
     public func startUpload(confirmedYellowIssues: Bool = false) async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
-            uploadState = .failed(message: "Select a project before starting upload.")
+            uploadState = .failed(message: strings.selectProjectBeforeUpload)
             return
         }
         guard let account = accountProfile else {
-            uploadState = .failed(message: "Select or enter an Apple account before uploading.")
+            uploadState = .failed(message: strings.selectOrEnterAppleAccountBeforeUploading)
             return
         }
         guard !hasUnappliedProjectChanges else {
-            uploadState = .failed(message: "Apply project changes before uploading.")
+            uploadState = .failed(message: strings.applyProjectChangesBeforeUploading)
             return
         }
 
@@ -633,18 +654,18 @@ public final class AppViewModel: ObservableObject {
         uploadState = .running(step: .checkBundleAndApp)
 
         guard let currentCheckContext else {
-            uploadState = .failed(message: "Select or enter an Apple account before uploading.")
+            uploadState = .failed(message: strings.selectOrEnterAppleAccountBeforeUploading)
             return
         }
 
-        let results = await checkEngine.run(project: project, account: account)
+        let results = await checkEngine.run(project: project, account: account, language: language)
         checkResults = results
         lastCheckContext = currentCheckContext
         let checksPassed = !results.blocksUpload
-        uploadEvents.append(UploadEvent(step: .checkBundleAndApp, message: Self.checkResultsConsoleMessage(results), succeeded: checksPassed))
+        uploadEvents.append(UploadEvent(step: .checkBundleAndApp, message: checkResultsConsoleMessage(results), succeeded: checksPassed))
 
         guard checksPassed else {
-            uploadState = .failed(message: "Upload blocked by configuration issues. Resolve red checks before uploading.")
+            uploadState = .failed(message: strings.uploadBlockedByConfigurationIssues)
             return
         }
 
@@ -653,28 +674,29 @@ public final class AppViewModel: ObservableObject {
         do {
             let events = try await uploadRunner.runLocalUpload(project: project, account: account)
             uploadEvents.append(contentsOf: events)
-            uploadState = .succeeded(message: "Upload finished successfully.")
-            applyLastUploadSummary(success: true, message: events.last?.message ?? "Upload finished successfully.")
+            uploadState = .succeeded(message: strings.uploadFinishedSuccessfully)
+            applyLastUploadSummary(success: true, message: events.last?.message ?? strings.uploadFinishedSuccessfully)
         } catch {
-            uploadState = .failed(message: "Upload failed: \(error)")
-            applyLastUploadSummary(success: false, message: "Upload failed: \(error)")
+            let message = strings.uploadFailed(error)
+            uploadState = .failed(message: message)
+            applyLastUploadSummary(success: false, message: message)
         }
     }
 
     public func submitLatestBuildForBetaReview() async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
-            betaReviewState = .failed(message: "Select a project before submitting TestFlight review.")
+            betaReviewState = .failed(message: strings.selectProjectBeforeSubmittingReview)
             return
         }
         guard let account = accountProfile else {
-            betaReviewState = .failed(message: "Select an Apple account before submitting TestFlight review.")
+            betaReviewState = .failed(message: strings.selectAppleAccountBeforeSubmittingReview)
             return
         }
         guard let bundleID = project.bundleID, !bundleID.isEmpty,
               let version = project.version, !version.isEmpty,
               let buildNumber = project.buildNumber, !buildNumber.isEmpty else {
-            betaReviewState = .failed(message: "Bundle ID, version, and build number are required before submitting review.")
+            betaReviewState = .failed(message: strings.bundleVersionBuildRequiredBeforeSubmittingReview)
             return
         }
 
@@ -682,23 +704,23 @@ public final class AppViewModel: ObservableObject {
         do {
             let client = appStoreConnectClient(for: account)
             guard let app = try await client.fetchApp(bundleID: bundleID) else {
-                betaReviewState = .failed(message: "App Store Connect app not found for \(bundleID).")
+                betaReviewState = .failed(message: strings.appStoreConnectAppNotFound(bundleID))
                 return
             }
             guard let build = try await client.fetchBuilds(appID: app.id, appVersion: version, buildNumber: buildNumber).first else {
-                betaReviewState = .failed(message: "Uploaded build \(version) (\(buildNumber)) was not found in App Store Connect yet.")
+                betaReviewState = .failed(message: strings.uploadedBuildNotFound(version: version, buildNumber: buildNumber))
                 return
             }
             if let processingState = build.processingState, processingState != "VALID" {
-                betaReviewState = .failed(message: "Build \(version) (\(buildNumber)) is \(processingState). Wait until Apple processing is VALID.")
+                betaReviewState = .failed(message: strings.buildProcessingNotValid(version: version, buildNumber: buildNumber, processingState: processingState))
                 return
             }
 
             let submission = try await client.submitBetaReview(buildID: build.id)
-            let stateText = Self.readableBetaReviewState(submission.betaReviewState) ?? "Submitted"
-            betaReviewState = .succeeded(message: "Submitted to TestFlight review. State: \(stateText)")
+            let stateText = readableBetaReviewState(submission.betaReviewState) ?? strings.betaReviewStatusSubmitted
+            betaReviewState = .succeeded(message: strings.submittedToTestFlightReview(state: stateText))
         } catch {
-            betaReviewState = .failed(message: "Submit to TestFlight review failed: \(error)")
+            betaReviewState = .failed(message: strings.submitToTestFlightReviewFailed(error))
         }
     }
 
@@ -711,17 +733,17 @@ public final class AppViewModel: ObservableObject {
     public func refreshLatestBuildTestFlightStatus() async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
-            betaReviewState = .failed(message: "Select a project before refreshing TestFlight status.")
+            betaReviewState = .failed(message: strings.selectProjectBeforeRefreshingTestFlightStatus)
             return
         }
         guard let account = accountProfile else {
-            betaReviewState = .failed(message: "Select an Apple account before refreshing TestFlight status.")
+            betaReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus)
             return
         }
         guard let bundleID = project.bundleID, !bundleID.isEmpty,
               let version = project.version, !version.isEmpty,
               let buildNumber = project.buildNumber, !buildNumber.isEmpty else {
-            betaReviewState = .failed(message: "Bundle ID, version, and build number are required before refreshing status.")
+            betaReviewState = .failed(message: strings.bundleVersionBuildRequiredBeforeRefreshingStatus)
             return
         }
 
@@ -743,15 +765,15 @@ public final class AppViewModel: ObservableObject {
             }
 
             if linkFailureCount > 0 {
-                betaReviewState = .failed(message: "Linked external groups with \(linkFailureCount) failure.")
+                betaReviewState = .failed(message: strings.linkedExternalGroupsWithFailureCount(linkFailureCount))
             } else if let processingState = snapshot.processingState, processingState != "VALID" {
-                betaReviewState = .succeeded(message: "TestFlight status: \(snapshot.betaReviewStateText). Build processing: \(processingState)")
+                betaReviewState = .succeeded(message: strings.testFlightStatus(snapshot.betaReviewStateText, processingState: processingState))
             } else {
-                betaReviewState = .succeeded(message: "TestFlight status: \(snapshot.betaReviewStateText)")
+                betaReviewState = .succeeded(message: strings.testFlightStatus(snapshot.betaReviewStateText))
             }
             testFlightDistributionState = .loaded(finalSnapshot)
         } catch {
-            let message = Self.testFlightDistributionErrorMessage(error)
+            let message = testFlightDistributionErrorMessage(error)
             betaReviewState = .failed(message: message)
             testFlightDistributionState = .failed(message: message)
         }
@@ -768,11 +790,11 @@ public final class AppViewModel: ObservableObject {
     private func linkExternalGroupsForLatestBuild(targetGroupID: String?) async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
-            testFlightDistributionState = .failed(message: "Select a project before linking external groups.")
+            testFlightDistributionState = .failed(message: strings.selectProjectBeforeLinkingExternalGroups)
             return
         }
         guard let account = accountProfile else {
-            testFlightDistributionState = .failed(message: "Select an Apple account before linking external groups.")
+            testFlightDistributionState = .failed(message: strings.selectAppleAccountBeforeLinkingExternalGroups)
             return
         }
 
@@ -783,10 +805,10 @@ public final class AppViewModel: ObservableObject {
             let linkedSnapshot = await linkExternalGroups(snapshot: loaded.snapshot, client: loaded.client, targetGroupIDs: targetGroupIDs)
             testFlightDistributionState = .loaded(linkedSnapshot.snapshot)
             betaReviewState = linkedSnapshot.failureCount == 0
-                ? .succeeded(message: targetGroupID == nil ? "External TestFlight groups linked." : "External TestFlight group linked.")
-                : .failed(message: "Linked external groups with \(linkedSnapshot.failureCount) failure.")
+                ? .succeeded(message: targetGroupID == nil ? strings.externalTestFlightGroupsLinked : strings.externalTestFlightGroupLinked)
+                : .failed(message: strings.linkedExternalGroupsWithFailureCount(linkedSnapshot.failureCount))
         } catch {
-            let message = Self.testFlightDistributionErrorMessage(error)
+            let message = testFlightDistributionErrorMessage(error)
             testFlightDistributionState = .failed(message: message)
             betaReviewState = .failed(message: message)
         }
@@ -795,7 +817,7 @@ public final class AppViewModel: ObservableObject {
     public func applyProjectChanges() throws {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
-            uploadState = .failed(message: "Select a project before applying project changes.")
+            uploadState = .failed(message: strings.selectProjectBeforeApplyingProjectChanges)
             return
         }
         guard hasUnappliedProjectChanges else { return }
@@ -888,9 +910,9 @@ public final class AppViewModel: ObservableObject {
         testFlightDistributionState = .idle
     }
 
-    private static func checkResultsConsoleMessage(_ results: [CheckResult]) -> String {
+    private func checkResultsConsoleMessage(_ results: [CheckResult]) -> String {
         guard !results.isEmpty else {
-            return "[OK] Configuration checks completed with no issues."
+            return strings.configurationChecksCompletedNoIssues
         }
 
         return results.map { result in
@@ -907,17 +929,17 @@ public final class AppViewModel: ObservableObject {
         }.joined(separator: "\n\n")
     }
 
-    private static func readableBetaReviewState(_ state: String?) -> String? {
+    private func readableBetaReviewState(_ state: String?) -> String? {
         guard let state else { return nil }
         switch state {
         case "WAITING_FOR_REVIEW":
-            return "Waiting for Review"
+            return strings.betaReviewStatusWaitingForReview
         case "IN_REVIEW":
-            return "In Review"
+            return strings.betaReviewStatusInReview
         case "APPROVED":
-            return "Approved"
+            return strings.betaReviewStatusApproved
         case "REJECTED":
-            return "Rejected"
+            return strings.betaReviewStatusRejected
         default:
             return state
         }
@@ -943,6 +965,32 @@ public final class AppViewModel: ObservableObject {
             return snapshot
         default:
             return nil
+        }
+    }
+
+    private func relocalizeDistributionState() {
+        switch testFlightDistributionState {
+        case .loaded(let snapshot):
+            testFlightDistributionState = .loaded(localizedDistributionSnapshot(snapshot))
+        case .linking(let snapshot):
+            testFlightDistributionState = .linking(snapshot.map(localizedDistributionSnapshot))
+        default:
+            break
+        }
+    }
+
+    private func localizedDistributionSnapshot(_ snapshot: TestFlightDistributionSnapshot) -> TestFlightDistributionSnapshot {
+        var updated = snapshot
+        updated.betaReviewStateText = readableBetaReviewState(snapshot.betaReviewState) ?? strings.betaReviewStatusNotSubmitted
+        return updated
+    }
+
+    private func refreshBetaReviewStatusMessageFromSnapshot() {
+        guard case .succeeded = betaReviewState, let snapshot = currentDistributionSnapshot else { return }
+        if let processingState = snapshot.processingState, processingState != "VALID" {
+            betaReviewState = .succeeded(message: strings.testFlightStatus(snapshot.betaReviewStateText, processingState: processingState))
+        } else {
+            betaReviewState = .succeeded(message: strings.testFlightStatus(snapshot.betaReviewStateText))
         }
     }
 
@@ -1015,7 +1063,7 @@ public final class AppViewModel: ObservableObject {
         let internalGroups = groups.filter(\.isInternalGroup).sorted { $0.name < $1.name }
         let externalGroups = groups.filter { !$0.isInternalGroup }.sorted { $0.name < $1.name }
         let betaReviewState = betaReviewSubmission?.betaReviewState ?? build.betaReviewState
-        let reviewStateText = Self.readableBetaReviewState(betaReviewState) ?? "Not Submitted"
+        let reviewStateText = readableBetaReviewState(betaReviewState) ?? strings.betaReviewStatusNotSubmitted
 
         return (
             TestFlightDistributionSnapshot(
@@ -1034,25 +1082,25 @@ public final class AppViewModel: ObservableObject {
         )
     }
 
-    private static func testFlightDistributionErrorMessage(_ error: Error) -> String {
+    private func testFlightDistributionErrorMessage(_ error: Error) -> String {
         switch error {
         case TestFlightDistributionError.missingProjectFields:
-            return "Bundle ID, version, and build number are required before refreshing TestFlight distribution."
+            return strings.bundleVersionBuildRequiredBeforeRefreshingDistribution
         case let TestFlightDistributionError.appNotFound(bundleID):
-            return "App Store Connect app not found for \(bundleID)."
+            return strings.appStoreConnectAppNotFound(bundleID)
         case let TestFlightDistributionError.buildNotFound(version, buildNumber):
-            return "Uploaded build \(version) (\(buildNumber)) was not found in App Store Connect yet."
+            return strings.uploadedBuildNotFound(version: version, buildNumber: buildNumber)
         default:
-            return "Refresh TestFlight distribution failed: \(error)"
+            return strings.refreshTestFlightDistributionFailed(error)
         }
     }
 
-    private func persistState(message: String = "Failed to save changes.") {
+    private func persistState(message: String? = nil) {
         do {
             try accountStore.save(accountProfiles)
             try store.save(persistedProjects())
         } catch {
-            uploadState = .failed(message: "\(message) \(error)")
+            uploadState = .failed(message: "\(message ?? strings.failedToSaveChanges) \(error)")
         }
     }
 
@@ -1064,9 +1112,9 @@ public final class AppViewModel: ObservableObject {
 
         let applied = appliedProjectSettingsByID[project.id] ?? AppliedProjectSettings(project: project)
         var summary: [String] = []
-        appendMutationSummary(&summary, label: "Bundle ID", old: applied.bundleID, new: project.bundleID)
-        appendMutationSummary(&summary, label: "Version", old: applied.version, new: project.version)
-        appendMutationSummary(&summary, label: "Build Number", old: applied.buildNumber, new: project.buildNumber)
+        appendMutationSummary(&summary, label: strings.bundleID, old: applied.bundleID, new: project.bundleID)
+        appendMutationSummary(&summary, label: strings.version, old: applied.version, new: project.version)
+        appendMutationSummary(&summary, label: strings.mutationLabelBuildNumber, old: applied.buildNumber, new: project.buildNumber)
         projectMutationSummary = summary
     }
 
@@ -1293,13 +1341,18 @@ private final class LiveConfigurationCheckEngine: ConfigurationCheckEngineProtoc
     }
 
     func run(project: ProjectProfile, account: AppleAccountProfile) async -> [CheckResult] {
+        await run(project: project, account: account, language: .english)
+    }
+
+    func run(project: ProjectProfile, account: AppleAccountProfile, language: AppLanguage) async -> [CheckResult] {
         let client = AppStoreConnectClient { [credentialVault, jwtSigner] in
             let privateKey = try credentialVault.privateKey(for: account.id)
             return try jwtSigner.makeJWT(account: account, privateKeyPEM: privateKey)
         }
         let engine = ConfigurationCheckEngine(
-            environment: XcodeEnvironmentChecker(commandRunner: commandRunner),
-            appStoreConnect: client
+            environment: XcodeEnvironmentChecker(commandRunner: commandRunner, language: language),
+            appStoreConnect: client,
+            language: language
         )
         return await engine.run(project: project, account: account)
     }

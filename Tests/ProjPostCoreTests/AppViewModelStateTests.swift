@@ -872,6 +872,36 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.uploadState, .succeeded(message: "Upload finished successfully."))
     }
 
+    func testStartUploadUsesSelectedLanguageForChecksAndConsoleMessages() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let checkEngine = FakeConfigurationCheckEngine()
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: checkEngine,
+            uploadRunner: FakeUploadJobRunner(),
+            projects: [project],
+            accountProfiles: [account],
+            language: .simplifiedChinese
+        )
+
+        await viewModel.startUpload()
+
+        XCTAssertEqual(checkEngine.lastLanguage, .simplifiedChinese)
+        XCTAssertEqual(viewModel.uploadEvents.first?.message, "[OK] 配置检查完成，没有发现问题。")
+        XCTAssertEqual(viewModel.uploadState, .succeeded(message: "上传成功完成。"))
+    }
+
     func testProjectEditsInvalidateChecksAndBlockUploadUntilChecksRerun() async {
         let runner = FakeUploadJobRunner()
         let checkEngine = FakeConfigurationCheckEngine()
@@ -1452,6 +1482,7 @@ private final class FakeConfigurationCheckEngine: ConfigurationCheckEngineProtoc
     var results: [CheckResult]
     private(set) var lastProject: ProjectProfile?
     private(set) var lastAccount: AppleAccountProfile?
+    private(set) var lastLanguage: AppLanguage?
     private(set) var runCallCount = 0
 
     init(results: [CheckResult] = []) {
@@ -1459,9 +1490,14 @@ private final class FakeConfigurationCheckEngine: ConfigurationCheckEngineProtoc
     }
 
     func run(project: ProjectProfile, account: AppleAccountProfile) async -> [CheckResult] {
+        await run(project: project, account: account, language: .english)
+    }
+
+    func run(project: ProjectProfile, account: AppleAccountProfile, language: AppLanguage) async -> [CheckResult] {
         runCallCount += 1
         lastProject = project
         lastAccount = account
+        lastLanguage = language
         return results
     }
 }

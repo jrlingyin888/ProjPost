@@ -4,6 +4,11 @@ import SwiftUI
 struct UploadProgressView: View {
     let state: UploadJobState
     let events: [UploadEvent]
+    @EnvironmentObject private var localizationStore: LocalizationStore
+
+    private var strings: AppStrings {
+        AppStrings(language: localizationStore.language)
+    }
 
     var body: some View {
         GroupBox {
@@ -12,7 +17,7 @@ struct UploadProgressView: View {
                     .font(.headline)
 
                 if events.isEmpty {
-                    Text("No upload events yet.")
+                    Text(strings.noUploadEvents)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(Array(events.enumerated()), id: \.offset) { _, event in
@@ -20,7 +25,7 @@ struct UploadProgressView: View {
                             Image(systemName: event.succeeded ? "checkmark.circle.fill" : "xmark.octagon.fill")
                                 .foregroundStyle(event.succeeded ? .green : .red)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(event.step.rawValue)
+                                Text(strings.uploadStep(event.step))
                                     .font(.subheadline.weight(.medium))
                                 Text(event.message)
                                     .font(.system(.caption, design: .monospaced))
@@ -34,22 +39,22 @@ struct UploadProgressView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
-            Label("Upload Console", systemImage: "terminal")
+            Label(strings.uploadConsole, systemImage: "terminal")
         }
     }
 
     private var stateText: String {
         switch state {
         case .idle:
-            return "Idle"
+            return strings.idle
         case .running(let step):
-            return "Running \(step.rawValue)"
+            return strings.runningUploadStep(step)
         case .succeeded(let message):
             return message
         case .failed(let message):
             return message
         case .cancelled:
-            return "Cancelled"
+            return strings.cancelled
         }
     }
 

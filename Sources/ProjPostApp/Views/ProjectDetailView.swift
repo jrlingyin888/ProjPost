@@ -18,10 +18,15 @@ private enum AccountFileImport {
 
 struct ProjectDetailView: View {
     @ObservedObject var viewModel: AppViewModel
+    @EnvironmentObject private var localizationStore: LocalizationStore
     @State private var showAccountFileImporter = false
     @State private var activeAccountFileImport: AccountFileImport?
     @State private var isEditingSavedAccount = false
     @State private var showAppleAccountGuide = false
+
+    private var strings: AppStrings {
+        AppStrings(language: localizationStore.language)
+    }
 
     var body: some View {
         ScrollView {
@@ -58,9 +63,9 @@ struct ProjectDetailView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(viewModel.selectedProject?.name ?? "Select a project")
+                Text(viewModel.selectedProject?.name ?? strings.selectAProject)
                     .font(.title2.weight(.semibold))
-                Text(viewModel.selectedProject?.projectPath ?? "Choose a project from the sidebar or add one.")
+                Text(viewModel.selectedProject?.projectPath ?? strings.selectProjectPrompt)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -70,10 +75,10 @@ struct ProjectDetailView: View {
                     do {
                         try viewModel.loadProjects()
                     } catch {
-                        viewModel.uploadState = .failed(message: "Failed to load projects: \(error)")
+                        viewModel.uploadState = .failed(message: strings.loadProjectsFailed(error))
                     }
                 } label: {
-                    Label("Load", systemImage: "arrow.clockwise")
+                    Label(strings.load, systemImage: "arrow.clockwise")
                 }
                 .disabled(viewModel.isOperationRunning)
 
@@ -81,10 +86,10 @@ struct ProjectDetailView: View {
                     do {
                         try viewModel.saveProjects()
                     } catch {
-                        viewModel.uploadState = .failed(message: "Failed to save projects: \(error)")
+                        viewModel.uploadState = .failed(message: strings.saveProjectsFailed(error))
                     }
                 } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+                    Label(strings.save, systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isOperationRunning)
@@ -95,35 +100,35 @@ struct ProjectDetailView: View {
     private var projectFields: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                editableRow("Name", text: Binding(
+                editableRow(strings.name, text: Binding(
                     get: { viewModel.selectedProject?.name ?? "" },
                     set: viewModel.updateSelectedProjectName
                 ))
-                editableRow("Project Path", text: Binding(
+                editableRow(strings.projectPath, text: Binding(
                     get: { viewModel.selectedProject?.projectPath ?? "" },
                     set: viewModel.updateSelectedProjectPath
                 ))
-                editableRow("Bundle ID", text: Binding(
+                editableRow(strings.bundleID, text: Binding(
                     get: { viewModel.selectedProject?.bundleID ?? "" },
                     set: viewModel.updateSelectedProjectBundleID
                 ))
-                editableRow("Version", text: Binding(
+                editableRow(strings.version, text: Binding(
                     get: { viewModel.selectedProject?.version ?? "" },
                     set: viewModel.updateSelectedProjectVersion
                 ))
-                editableRow("Build", text: Binding(
+                editableRow(strings.build, text: Binding(
                     get: { viewModel.selectedProject?.buildNumber ?? "" },
                     set: viewModel.updateSelectedProjectBuildNumber
                 ))
-                editableRow("Team ID", text: Binding(
+                editableRow(strings.teamID, text: Binding(
                     get: { viewModel.selectedProject?.teamID ?? "" },
                     set: viewModel.updateSelectedProjectTeamID
                 ))
-                editableRow("Scheme", text: Binding(
+                editableRow(strings.scheme, text: Binding(
                     get: { viewModel.selectedProject?.scheme ?? "" },
                     set: viewModel.updateSelectedProjectScheme
                 ))
-                editableRow("Configuration", text: Binding(
+                editableRow(strings.configuration, text: Binding(
                     get: { viewModel.selectedProject?.configuration ?? "" },
                     set: viewModel.updateSelectedProjectConfiguration
                 ))
@@ -131,7 +136,7 @@ struct ProjectDetailView: View {
                 if viewModel.hasUnappliedProjectChanges {
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Project changes are not applied to disk yet.", systemImage: "exclamationmark.triangle.fill")
+                        Label(strings.projectChangesNotApplied, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                         ForEach(viewModel.projectMutationSummary, id: \.self) { summary in
                             Text(summary)
@@ -142,10 +147,10 @@ struct ProjectDetailView: View {
                             do {
                                 try viewModel.applyProjectChanges()
                             } catch {
-                                viewModel.uploadState = .failed(message: "Apply project changes failed: \(error)")
+                                viewModel.uploadState = .failed(message: strings.applyProjectChangesFailed(error))
                             }
                         } label: {
-                            Label("Apply Project Changes", systemImage: "checkmark.seal")
+                            Label(strings.applyProjectChanges, systemImage: "checkmark.seal")
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -154,25 +159,25 @@ struct ProjectDetailView: View {
                 HStack {
                     Button {
                         guard let path = viewModel.selectedProject?.projectPath, !path.isEmpty else {
-                            viewModel.uploadState = .failed(message: "Enter a project path before scanning.")
+                            viewModel.uploadState = .failed(message: strings.enterProjectPathBeforeScanning)
                             return
                         }
                         Task {
                             do {
                                 try await viewModel.scanProject(atPath: path)
                             } catch {
-                                viewModel.uploadState = .failed(message: "Scan failed: \(error)")
+                                viewModel.uploadState = .failed(message: strings.scanFailed(error))
                             }
                         }
                     } label: {
-                        Label("Scan Project", systemImage: "doc.text.magnifyingglass")
+                        Label(strings.scanProject, systemImage: "doc.text.magnifyingglass")
                     }
                     .buttonStyle(.borderedProminent)
                     Spacer()
                 }
             }
         } label: {
-            Label("Project Workbench", systemImage: "shippingbox")
+            Label(strings.projectWorkbench, systemImage: "shippingbox")
         }
         .disabled(viewModel.isOperationRunning)
     }
@@ -180,8 +185,8 @@ struct ProjectDetailView: View {
     private var accountFields: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("Saved Account", selection: accountSelectionBinding) {
-                    Text("None")
+                Picker(strings.savedAccount, selection: accountSelectionBinding) {
+                    Text(strings.none)
                         .tag(Optional<UUID>.none)
                     ForEach(viewModel.accountProfiles) { profile in
                         Text(profile.displayName)
@@ -200,7 +205,7 @@ struct ProjectDetailView: View {
                         Button {
                             isEditingSavedAccount = true
                         } label: {
-                            Label("Edit Account", systemImage: "pencil")
+                            Label(strings.editAccount, systemImage: "pencil")
                         }
                         .buttonStyle(.bordered)
                     } else {
@@ -208,7 +213,7 @@ struct ProjectDetailView: View {
                             viewModel.saveAccountProfile()
                             isEditingSavedAccount = false
                         } label: {
-                            Label("Save Account", systemImage: "square.and.arrow.down")
+                            Label(strings.saveAccount, systemImage: "square.and.arrow.down")
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -217,14 +222,14 @@ struct ProjectDetailView: View {
                         isEditingSavedAccount = true
                         presentAccountFileImporter(.metadata)
                     } label: {
-                        Label("Import Metadata", systemImage: "doc.text")
+                        Label(strings.importMetadata, systemImage: "doc.text")
                     }
                     .buttonStyle(.bordered)
 
                     Button {
                         presentAccountFileImporter(.privateKey)
                     } label: {
-                        Label("Import .p8", systemImage: "key.horizontal")
+                        Label(strings.importP8, systemImage: "key.horizontal")
                     }
                     .buttonStyle(.bordered)
                     .disabled(!viewModel.accountDraft.isComplete)
@@ -235,14 +240,14 @@ struct ProjectDetailView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Label("Apple Account", systemImage: "person.crop.square")
+                Label(strings.appleAccount, systemImage: "person.crop.square")
                 Button {
                     showAppleAccountGuide = true
                 } label: {
-                    Label("Guide", systemImage: "questionmark.circle")
+                    Label(strings.guide, systemImage: "questionmark.circle")
                 }
                 .buttonStyle(.borderless)
-                .help("How to find .p8, Key ID, Issuer ID, and Team ID")
+                .help(strings.appleAccountGuideHelp)
             }
         }
         .disabled(viewModel.isOperationRunning)
@@ -268,8 +273,8 @@ struct ProjectDetailView: View {
                                 await viewModel.refreshLatestBuildTestFlightStatus()
                             }
                         } label: {
-                            Label("Refresh TF Status", systemImage: "arrow.clockwise")
-                        }
+                        Label(strings.refreshTFStatus, systemImage: "arrow.clockwise")
+                    }
                         .buttonStyle(.bordered)
                         .disabled(viewModel.isOperationRunning)
 
@@ -302,7 +307,7 @@ struct ProjectDetailView: View {
                 distributionSection
             }
         } label: {
-            Label("TestFlight Upload", systemImage: "paperplane")
+            Label(strings.testFlightUpload, systemImage: "paperplane")
         }
     }
 
@@ -310,12 +315,12 @@ struct ProjectDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             switch viewModel.testFlightDistributionState {
             case .idle:
-                placeholderRow(title: "TestFlight Distribution", value: "Refresh TF Status to load tester groups.")
+                placeholderRow(title: strings.testFlightDistribution, value: strings.refreshTFStatusToLoadTesterGroups)
             case .loading:
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading TestFlight groups...")
+                    Text(strings.loadingTestFlightGroups)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -324,7 +329,7 @@ struct ProjectDetailView: View {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Linking external TestFlight groups...")
+                        Text(strings.linkingExternalTestFlightGroups)
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -335,7 +340,7 @@ struct ProjectDetailView: View {
             case .loaded(let snapshot):
                 distributionSnapshotView(snapshot)
             case .failed(let message):
-                placeholderRow(title: "TestFlight Distribution", value: message)
+                placeholderRow(title: strings.testFlightDistribution, value: message)
             }
         }
     }
@@ -344,14 +349,14 @@ struct ProjectDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 placeholderRow(
-                    title: "Current build",
+                    title: strings.currentBuild,
                     value: "\(snapshot.version) (\(snapshot.buildNumber)) · \(snapshot.betaReviewStateText)"
                 )
                 Spacer()
             }
 
             if !snapshot.internalGroups.isEmpty {
-                Text("Internal Testing")
+                Text(strings.internalTesting)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 ForEach(snapshot.internalGroups) { group in
@@ -359,12 +364,12 @@ struct ProjectDetailView: View {
                 }
             }
 
-            Text("External Testing")
+            Text(strings.externalTesting)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             if snapshot.externalGroups.isEmpty {
-                placeholderRow(title: "External groups", value: "No external TestFlight groups found.")
+                placeholderRow(title: strings.externalGroups, value: strings.noExternalGroups)
             } else {
                 ForEach(snapshot.externalGroups) { group in
                     distributionGroupRow(group)
@@ -393,12 +398,12 @@ struct ProjectDetailView: View {
                             await viewModel.linkExternalGroupForLatestBuild(groupID: group.id)
                         }
                     } label: {
-                        Label("Link Build", systemImage: "link")
+                        Label(strings.linkBuild, systemImage: "link")
                     }
                     .buttonStyle(.bordered)
                     .disabled(viewModel.isOperationRunning || (group.isCurrentBuildAssociated && group.publicLinkEnabled))
 
-                    Toggle("Auto after approval", isOn: autoLinkExternalGroupBinding(groupID: group.id))
+                    Toggle(strings.autoAfterApproval, isOn: autoLinkExternalGroupBinding(groupID: group.id))
                         .toggleStyle(.checkbox)
                         .font(.caption)
                         .disabled(viewModel.isOperationRunning)
@@ -413,7 +418,7 @@ struct ProjectDetailView: View {
                     .textSelection(.enabled)
                     .foregroundStyle(.blue)
             } else if !group.isInternalGroup {
-                Text(group.publicLinkEnabled ? "Public link pending from Apple." : "Public link not enabled.")
+                Text(group.publicLinkEnabled ? strings.publicLinkPendingFromApple : strings.publicLinkNotEnabled)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -422,7 +427,7 @@ struct ProjectDetailView: View {
             case .idle:
                 EmptyView()
             case .linked:
-                Text("Linked")
+                Text(strings.linked)
                     .font(.caption)
                     .foregroundStyle(.green)
             case .failed(let message):
@@ -447,9 +452,9 @@ struct ProjectDetailView: View {
 
     private func groupStatusText(_ group: TestFlightDistributionGroup) -> String {
         if group.isInternalGroup {
-            return "Internal"
+            return strings.internalGroupStatus
         }
-        return group.publicLinkEnabled ? "Link On" : "Link Off"
+        return group.publicLinkEnabled ? strings.linkOn : strings.linkOff
     }
 
     private func groupStatusColor(_ group: TestFlightDistributionGroup) -> Color {
@@ -465,10 +470,10 @@ struct ProjectDetailView: View {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Uploading...")
+                Text(strings.uploading)
             }
         } else {
-            Label("Upload to TestFlight", systemImage: "icloud.and.arrow.up")
+            Label(strings.uploadToTestFlight, systemImage: "icloud.and.arrow.up")
         }
     }
 
@@ -478,10 +483,10 @@ struct ProjectDetailView: View {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Working...")
+                Text(strings.working)
             }
         } else {
-            Label("Submit to Beta Review", systemImage: "paperplane.circle")
+            Label(strings.submitToBetaReview, systemImage: "paperplane.circle")
         }
     }
 
@@ -497,19 +502,19 @@ struct ProjectDetailView: View {
 
     private var accountEditableFields: some View {
         VStack(alignment: .leading, spacing: 12) {
-            editableRow("Account", text: Binding(
+            editableRow(strings.account, text: Binding(
                 get: { viewModel.accountDraft.displayName },
                 set: { updateAccount(displayName: $0) }
             ))
-            editableRow("Key ID", text: Binding(
+            editableRow(strings.keyID, text: Binding(
                 get: { viewModel.accountDraft.keyID },
                 set: { updateAccount(keyID: $0) }
             ))
-            editableRow("Issuer ID", text: Binding(
+            editableRow(strings.issuerID, text: Binding(
                 get: { viewModel.accountDraft.issuerID },
                 set: { updateAccount(issuerID: $0) }
             ))
-            editableRow("Team ID", text: Binding(
+            editableRow(strings.teamID, text: Binding(
                 get: { viewModel.accountDraft.teamID },
                 set: { updateAccount(teamID: $0) }
             ))
@@ -524,7 +529,7 @@ struct ProjectDetailView: View {
     private func savedAccountSummary(_ profile: AppleAccountProfile) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Current Account", systemImage: "checkmark.circle.fill")
+                Label(strings.currentAccount, systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                 Spacer()
                 Text(profile.displayName)
@@ -532,9 +537,9 @@ struct ProjectDetailView: View {
             }
 
             HStack(alignment: .top, spacing: 18) {
-                summaryValue("Key ID", maskedIdentifier(profile.keyID))
-                summaryValue("Issuer ID", maskedIdentifier(profile.issuerID))
-                summaryValue("Team ID", profile.teamID.map(maskedIdentifier) ?? "-")
+                summaryValue(strings.keyID, maskedIdentifier(profile.keyID))
+                summaryValue(strings.issuerID, maskedIdentifier(profile.issuerID))
+                summaryValue(strings.teamID, profile.teamID.map(maskedIdentifier) ?? "-")
             }
         }
         .font(.caption)
@@ -583,7 +588,7 @@ struct ProjectDetailView: View {
         do {
             try viewModel.importAppleAccountMetadata(from: url)
         } catch {
-            viewModel.uploadState = .failed(message: "Metadata import failed: \(error)")
+            viewModel.uploadState = .failed(message: strings.metadataImportFailed(error))
         }
     }
 
@@ -601,7 +606,7 @@ struct ProjectDetailView: View {
             if case .failed = viewModel.uploadState {
                 return
             }
-            viewModel.uploadState = .failed(message: "Private key import failed: \(error)")
+            viewModel.uploadState = .failed(message: strings.privateKeyImportFailed(error))
         }
     }
 
@@ -622,15 +627,15 @@ struct ProjectDetailView: View {
 
         switch viewModel.privateKeyStatus {
         case .missing:
-            title = "Key Missing"
+            title = strings.keyMissing
             systemImage = "exclamationmark.circle"
             color = .orange
         case .saved:
-            title = "Key Saved"
+            title = strings.keySaved
             systemImage = "checkmark.circle.fill"
             color = .green
         case .failed:
-            title = "Key Failed"
+            title = strings.keyFailed
             systemImage = "xmark.octagon.fill"
             color = .red
         }
@@ -642,9 +647,9 @@ struct ProjectDetailView: View {
 
     private var statusText: String {
         if viewModel.hasUnappliedProjectChanges {
-            return "Apply project changes before running checks or uploading."
+            return strings.applyProjectChangesBeforeChecksOrUploading
         }
-        return "Configuration checks run automatically when upload starts."
+        return strings.configurationChecksRunAutomatically
     }
 
     private var statusColor: Color {
@@ -659,7 +664,7 @@ struct ProjectDetailView: View {
         case .idle:
             return nil
         case .running:
-            return "Updating TestFlight status..."
+            return strings.updatingTestFlightStatus
         case .succeeded(let message):
             return message
         case .failed(let message):
@@ -669,16 +674,22 @@ struct ProjectDetailView: View {
 
     private var betaReviewStatusColor: Color {
         if let betaReviewStatusText {
-            if betaReviewStatusText.localizedCaseInsensitiveContains("Approved") {
+            if betaReviewStatusText.localizedCaseInsensitiveContains("Approved") ||
+                betaReviewStatusText.contains("已通过") {
                 return .green
             }
-            if betaReviewStatusText.localizedCaseInsensitiveContains("Rejected") {
+            if betaReviewStatusText.localizedCaseInsensitiveContains("Rejected") ||
+                betaReviewStatusText.contains("已拒绝") {
                 return .red
             }
             if betaReviewStatusText.localizedCaseInsensitiveContains("Waiting for Review") ||
                 betaReviewStatusText.localizedCaseInsensitiveContains("In Review") ||
                 betaReviewStatusText.localizedCaseInsensitiveContains("Submitted") ||
-                betaReviewStatusText.localizedCaseInsensitiveContains("Updating") {
+                betaReviewStatusText.localizedCaseInsensitiveContains("Updating") ||
+                betaReviewStatusText.contains("等待审核") ||
+                betaReviewStatusText.contains("审核中") ||
+                betaReviewStatusText.contains("已提交") ||
+                betaReviewStatusText.contains("正在更新") {
                 return .yellow
             }
         }

@@ -20,7 +20,8 @@ final class DomainModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(profile.versionDisplay, "v1.0.0 (12)")
-        XCTAssertEqual(profile.statusLabel, "未配置")
+        XCTAssertEqual(profile.statusLabel(language: .english), "Not Configured")
+        XCTAssertEqual(profile.statusLabel(language: .simplifiedChinese), "未配置")
     }
 
     func testCheckSeverityBlocksUploadOnlyForRedResults() {

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ProjectListView: View {
     @ObservedObject var viewModel: AppViewModel
+    @EnvironmentObject private var localizationStore: LocalizationStore
     @State private var showProjectDirectoryImporter = false
     @State private var isAddingProject = false
     @State private var isDeleteMode = false
@@ -11,13 +12,17 @@ struct ProjectListView: View {
     @State private var showDeleteConfirmation = false
     @State private var isProjectDropTarget = false
 
+    private var strings: AppStrings {
+        AppStrings(language: localizationStore.language)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isDeleteMode ? "Select Projects" : "Projects")
+                    Text(isDeleteMode ? strings.selectProjectsTitle : strings.projectsTitle)
                         .font(.title3.weight(.semibold))
-                    Text(isDeleteMode ? "Choose projects to remove." : "Choose a workbench or add a new upload target.")
+                    Text(isDeleteMode ? strings.selectProjectsSubtitle : strings.projectsSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -29,7 +34,7 @@ struct ProjectListView: View {
                         Button(role: .destructive) {
                             enterDeleteMode()
                         } label: {
-                            Label("Delete Projects", systemImage: "trash")
+                            Label(strings.deleteProjects, systemImage: "trash")
                         }
                         .disabled(viewModel.projects.isEmpty || viewModel.isOperationRunning)
                     } label: {
@@ -37,7 +42,7 @@ struct ProjectListView: View {
                             .frame(width: 28, height: 28)
                     }
                     .menuStyle(.borderlessButton)
-                    .help("More")
+                    .help(strings.more)
                     .disabled(viewModel.projects.isEmpty || viewModel.isOperationRunning)
                 }
             }
@@ -84,16 +89,16 @@ struct ProjectListView: View {
             guard case let .success(urls) = result, let url = urls.first else { return }
             addProject(from: url)
         }
-        .alert("Delete Selected Projects?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {
+        .alert(strings.deleteSelectedProjectsTitle, isPresented: $showDeleteConfirmation) {
+            Button(strings.cancel, role: .cancel) {
                 showDeleteConfirmation = false
             }
-            Button("Delete", role: .destructive) {
+            Button(strings.delete, role: .destructive) {
                 viewModel.deleteProjects(selectedProjectsForDeletion)
                 exitDeleteMode()
             }
         } message: {
-            Text("This will remove \(selectedProjectsForDeletion.count) project(s) from the sidebar.")
+            Text(strings.deleteSelectedProjectsMessage(count: selectedProjectsForDeletion.count))
         }
         .onDrop(of: [.fileURL], isTargeted: $isProjectDropTarget) { providers in
             handleProjectDrop(providers)
@@ -109,7 +114,7 @@ struct ProjectListView: View {
                 try await viewModel.addProjectFromDirectory(url)
             } catch {
                 await MainActor.run {
-                    viewModel.uploadState = .failed(message: "Scan failed: \(error)")
+                    viewModel.uploadState = .failed(message: strings.scanFailed(error))
                 }
             }
 
@@ -126,18 +131,31 @@ struct ProjectListView: View {
     private var addProjectActions: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Label("Add Project", systemImage: "plus.square.on.square")
+                Label(strings.addProject, systemImage: "plus.square.on.square")
                     .font(.headline)
                 Spacer()
-                Text(ProductBranding.appVersionDisplay)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Picker(strings.languageTitle, selection: $localizationStore.language) {
+                        ForEach(AppLanguage.allCases) { language in
+                            Text(language.displayName)
+                                .tag(language)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 112)
+                    .disabled(viewModel.isOperationRunning)
+
+                    Text(ProductBranding.appVersionDisplay)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack {
                 Button {
                     showProjectDirectoryImporter = true
                 } label: {
-                    Label(isAddingProject ? "Scanning" : "Choose Folder", systemImage: "folder.badge.plus")
+                    Label(isAddingProject ? strings.scanning : strings.chooseFolder, systemImage: "folder.badge.plus")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isAddingProject || viewModel.isOperationRunning)
@@ -151,15 +169,15 @@ struct ProjectListView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isProjectDropTarget ? Color.accentColor.opacity(0.75) : Color.clear, lineWidth: 1.5)
         }
-        .help("Choose or drop a project folder")
+        .help(strings.chooseOrDropProjectFolderHelp)
     }
 
     private var deleteActions: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("\(selectedProjectsForDeletion.count) Selected", systemImage: "checklist")
+            Label(strings.selectedCount(selectedProjectsForDeletion.count), systemImage: "checklist")
                 .font(.headline)
             HStack {
-                Button("Cancel") {
+                Button(strings.cancel) {
                     exitDeleteMode()
                 }
                 .disabled(viewModel.isOperationRunning)
@@ -167,7 +185,7 @@ struct ProjectListView: View {
                 Button(role: .destructive) {
                     showDeleteConfirmation = true
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label(strings.delete, systemImage: "trash")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(selectedProjectsForDeletion.isEmpty || viewModel.isOperationRunning)
@@ -203,7 +221,7 @@ struct ProjectListView: View {
             HStack {
                 Label(project.versionDisplay, systemImage: "number")
                 Spacer()
-                Text(project.statusLabel)
+                Text(project.statusLabel(language: localizationStore.language))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(statusBackground(for: project), in: Capsule())

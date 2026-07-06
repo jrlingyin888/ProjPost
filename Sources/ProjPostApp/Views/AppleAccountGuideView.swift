@@ -4,8 +4,14 @@ import SwiftUI
 
 struct AppleAccountGuideView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var localizationStore: LocalizationStore
     @State private var language = AppleAccountGuideContent.defaultLanguage
     @State private var previewedScreenshot: AppleAccountGuideScreenshot?
+    @State private var appliedInitialGlobalLanguage = false
+
+    private var strings: AppStrings {
+        AppStrings(language: localizationStore.language)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +34,11 @@ struct AppleAccountGuideView: View {
         .sheet(item: $previewedScreenshot) { screenshot in
             screenshotPreview(screenshot)
         }
+        .onAppear {
+            guard !appliedInitialGlobalLanguage else { return }
+            language = localizationStore.language.appleAccountGuideLanguage
+            appliedInitialGlobalLanguage = true
+        }
     }
 
     private var header: some View {
@@ -39,7 +50,7 @@ struct AppleAccountGuideView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("Language", selection: $language) {
+            Picker(strings.languageTitle, selection: $language) {
                 ForEach(AppleAccountGuideLanguage.allCases) { option in
                     Text(AppleAccountGuideContent.languageDisplayName(option))
                         .tag(option)
@@ -108,7 +119,7 @@ struct AppleAccountGuideView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                Label("Screenshot resource missing: \(screenshot.resourceName)", systemImage: "photo")
+                Label(strings.screenshotResourceMissing(screenshot.resourceName), systemImage: "photo")
                     .foregroundStyle(.orange)
             }
         }
@@ -150,7 +161,7 @@ struct AppleAccountGuideView: View {
                         .frame(maxWidth: 1200, maxHeight: 760)
                         .padding(20)
                 } else {
-                    Label("Screenshot resource missing: \(screenshot.resourceName)", systemImage: "photo")
+                    Label(strings.screenshotResourceMissing(screenshot.resourceName), systemImage: "photo")
                         .foregroundStyle(.orange)
                         .padding(40)
                 }

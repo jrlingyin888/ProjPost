@@ -3,7 +3,7 @@ import XCTest
 
 final class ConfigurationCheckEngineTests: XCTestCase {
     func testMissingBundleIDIsRed() async {
-        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(), appStoreConnect: FakeASCClient(app: nil, bundle: nil, builds: []))
+        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(language: .english), appStoreConnect: FakeASCClient(app: nil, bundle: nil, builds: []), language: .english)
         let project = ProjectProfile(name: "Demo", projectPath: "/tmp/Demo", workspacePath: nil, projectFilePath: nil, scheme: nil, configuration: "Release", bundleID: nil, version: "1.0.0", buildNumber: "1", teamID: nil, selectedAccountID: nil, lastUpload: nil)
         let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: nil, lastVerifiedAt: nil)
 
@@ -11,6 +11,18 @@ final class ConfigurationCheckEngineTests: XCTestCase {
 
         XCTAssertTrue(results.blocksUpload)
         XCTAssertEqual(results.first { $0.id == "bundle-id" }?.severity, .red)
+        XCTAssertEqual(results.first { $0.id == "bundle-id" }?.title, "Bundle ID Missing")
+    }
+
+    func testMissingBundleIDCanReturnSimplifiedChinese() async {
+        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(language: .simplifiedChinese), appStoreConnect: FakeASCClient(app: nil, bundle: nil, builds: []), language: .simplifiedChinese)
+        let project = ProjectProfile(name: "Demo", projectPath: "/tmp/Demo", workspacePath: nil, projectFilePath: nil, scheme: nil, configuration: "Release", bundleID: nil, version: "1.0.0", buildNumber: "1", teamID: nil, selectedAccountID: nil, lastUpload: nil)
+        let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: nil, lastVerifiedAt: nil)
+
+        let results = await engine.run(project: project, account: account)
+
+        XCTAssertEqual(results.first { $0.id == "bundle-id" }?.title, "Bundle ID 缺失")
+        XCTAssertEqual(results.first { $0.id == "bundle-id" }?.message, "请填写 Bundle ID 后重新检查")
     }
 
     func testExistingBuildNumberForSameVersionIsRed() async {
@@ -19,7 +31,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
             bundle: ASCBundleID(id: "bundle1", identifier: "com.example.demo", platform: "IOS"),
             builds: [ASCBuild(id: "build1", version: "7", processingState: "VALID")]
         )
-        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(), appStoreConnect: fakeASC)
+        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(language: .english), appStoreConnect: fakeASC)
         let project = ProjectProfile(name: "Demo", projectPath: "/tmp/Demo", workspacePath: nil, projectFilePath: nil, scheme: "Demo", configuration: "Release", bundleID: "com.example.demo", version: "1.0.0", buildNumber: "7", teamID: nil, selectedAccountID: nil, lastUpload: nil)
         let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: nil, lastVerifiedAt: nil)
 
@@ -37,7 +49,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
             bundle: ASCBundleID(id: "bundle1", identifier: "com.example.demo", platform: "IOS"),
             builds: []
         )
-        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(), appStoreConnect: fakeASC)
+        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(language: .english), appStoreConnect: fakeASC)
         let project = ProjectProfile(name: "Demo", projectPath: "/tmp/Demo", workspacePath: nil, projectFilePath: nil, scheme: "Demo", configuration: "Release", bundleID: "com.example.demo", version: "1.2.6", buildNumber: "1", teamID: "TEAM123", selectedAccountID: nil, lastUpload: nil)
         let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
 
@@ -57,7 +69,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
             builds: [],
             fetchBuildsError: TestError.unavailable
         )
-        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(), appStoreConnect: fakeASC)
+        let engine = ConfigurationCheckEngine(environment: PassingEnvironmentChecker(language: .english), appStoreConnect: fakeASC)
         let project = ProjectProfile(name: "Demo", projectPath: "/tmp/Demo", workspacePath: nil, projectFilePath: nil, scheme: "Demo", configuration: "Release", bundleID: "com.example.demo", version: "1.0.0", buildNumber: "7", teamID: nil, selectedAccountID: nil, lastUpload: nil)
         let account = AppleAccountProfile(displayName: "Company", keyID: "ABC123DEF4", issuerID: "issuer", teamID: nil, lastVerifiedAt: nil)
 
@@ -70,7 +82,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
 
     func testXcodeEnvironmentCheckerReturnsGreenOnSuccessAndRedOnFailure() async {
         let successRunner = FakeCommandRunner(result: CommandResult(exitCode: 0, stdout: "Xcode 15.4\nBuild version 15F31d\n", stderr: ""))
-        let successChecker = XcodeEnvironmentChecker(commandRunner: successRunner)
+        let successChecker = XcodeEnvironmentChecker(commandRunner: successRunner, language: .english)
 
         let successResult = await successChecker.checkXcode()
 
@@ -82,7 +94,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
         XCTAssertEqual(successResult.severity, .green)
 
         let failureRunner = FakeCommandRunner(result: CommandResult(exitCode: 1, stdout: "", stderr: "xcodebuild: command not found"))
-        let failureChecker = XcodeEnvironmentChecker(commandRunner: failureRunner)
+        let failureChecker = XcodeEnvironmentChecker(commandRunner: failureRunner, language: .english)
 
         let failureResult = await failureChecker.checkXcode()
 
@@ -95,7 +107,7 @@ final class ConfigurationCheckEngineTests: XCTestCase {
             CommandResult(exitCode: 0, stdout: "Xcode 26.6\nBuild version 17F113\n", stderr: ""),
             CommandResult(exitCode: 127, stdout: "", stderr: "env: rsync: No such file or directory")
         ])
-        let checker = XcodeEnvironmentChecker(commandRunner: runner)
+        let checker = XcodeEnvironmentChecker(commandRunner: runner, language: .simplifiedChinese)
 
         let result = await checker.checkXcode()
 
@@ -108,8 +120,10 @@ final class ConfigurationCheckEngineTests: XCTestCase {
 }
 
 private struct PassingEnvironmentChecker: EnvironmentChecking {
+    var language: AppLanguage
+
     func checkXcode() async -> CheckResult {
-        CheckResult(id: "xcode", title: "Xcode 可用", message: "已检测到 Xcode", severity: .green)
+        CheckResult(id: "xcode", title: AppStrings(language: language).configurationCheckXcodeAvailableTitle, message: "Detected Xcode", severity: .green)
     }
 }
 

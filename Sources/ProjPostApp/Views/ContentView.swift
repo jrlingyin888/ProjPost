@@ -17,10 +17,10 @@ struct ContentView: View {
         } detail: {
             ProjectDetailView(viewModel: viewModel)
         }
-        .navigationTitle("")
+        .navigationTitle(ProductBranding.displayName)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                appTitle
+                appVersionBadge
             }
         }
         .environmentObject(localizationStore)
@@ -55,21 +55,16 @@ struct ContentView: View {
         }
     }
 
-    private var appTitle: some View {
-        HStack(spacing: 8) {
-            Text(ProductBranding.displayName)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
-            Text(ProductBranding.appVersionDisplay)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(.quaternary.opacity(0.8), in: Capsule())
-        }
+    private var appVersionBadge: some View {
+        Text(ProductBranding.appVersionDisplay)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.quaternary.opacity(0.8), in: Capsule())
+            .fixedSize()
         .lineLimit(1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(ProductBranding.displayName) \(ProductBranding.appVersionDisplay)")
+            .accessibilityLabel(ProductBranding.appVersionDisplay)
     }
 
     private var updateAlertBinding: Binding<Bool> {

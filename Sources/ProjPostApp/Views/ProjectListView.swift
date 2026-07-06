@@ -134,12 +134,6 @@ struct ProjectListView: View {
                 Label(strings.addProject, systemImage: "plus.square.on.square")
                     .font(.headline)
                     .lineLimit(1)
-                Spacer()
-                Text(ProductBranding.appVersionDisplay)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
             }
 
             HStack {

@@ -34,6 +34,24 @@ public struct AppStrings: Equatable {
     public var selectProjectPrompt: String { text("Choose a project from the sidebar or add one.", "从侧边栏选择项目，或添加一个项目。") }
     public var load: String { text("Load", "加载") }
     public var save: String { text("Save", "保存") }
+    public var later: String { text("Later", "稍后") }
+    public var updateAvailableTitle: String { text("Update Available", "发现新版本") }
+    public var downloadUpdate: String { text("Download Update", "下载更新") }
+
+    public func updateAvailableMessage(currentVersion: String, latestVersion: String) -> String {
+        text(
+            """
+            JJPost \(latestVersion) is available. You are using \(currentVersion).
+
+            Installation is manual: quit JJPost, download the zip, unzip it, replace the old JJPost.app, then reopen JJPost.
+            """,
+            """
+            JJPost \(latestVersion) 已可用。当前版本是 \(currentVersion)。
+
+            安装需要手动完成：退出 JJPost，下载 zip，解压后替换旧的 JJPost.app，然后重新打开 JJPost。
+            """
+        )
+    }
 
     public var projectWorkbench: String { text("Project Workbench", "项目工作台") }
     public var name: String { text("Name", "名称") }

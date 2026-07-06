@@ -35,6 +35,9 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(strings.projectStatusNotConfigured, "Not Configured")
         XCTAssertEqual(strings.betaReviewStatusWaitingForReview, "Waiting for Review")
         XCTAssertEqual(strings.configurationCheckXcodeAvailableTitle, "Xcode Available")
+        XCTAssertEqual(strings.updateAvailableTitle, "Update Available")
+        XCTAssertEqual(strings.downloadUpdate, "Download Update")
+        XCTAssertTrue(strings.updateAvailableMessage(currentVersion: "1.0.0", latestVersion: "1.1.0").contains("replace the old JJPost.app"))
     }
 
     func testRepresentativeSimplifiedChineseStrings() {
@@ -46,6 +49,9 @@ final class LocalizationTests: XCTestCase {
         XCTAssertEqual(strings.projectStatusNotConfigured, "未配置")
         XCTAssertEqual(strings.betaReviewStatusWaitingForReview, "正在等待审核")
         XCTAssertEqual(strings.configurationCheckXcodeAvailableTitle, "Xcode 可用")
+        XCTAssertEqual(strings.updateAvailableTitle, "发现新版本")
+        XCTAssertEqual(strings.downloadUpdate, "下载更新")
+        XCTAssertTrue(strings.updateAvailableMessage(currentVersion: "1.0.0", latestVersion: "1.1.0").contains("替换旧的 JJPost.app"))
     }
 
     func testGuideLanguageMapsFromAppLanguage() {

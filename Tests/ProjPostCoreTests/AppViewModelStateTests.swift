@@ -65,6 +65,70 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(project.autoLinkExternalGroupIDsAfterBetaApproval, [])
     }
 
+    func testCheckForUpdatesPublishesAvailableRelease() async {
+        let release = AppReleaseInfo(
+            version: "1.1.0",
+            tagName: "v1.1.0",
+            name: "JJPost v1.1.0",
+            releaseURL: URL(string: "https://github.com/jrlingyin888/ProjPost/releases/tag/v1.1.0")!,
+            assetDownloadURL: nil
+        )
+        let updateChecker = FakeAppUpdateChecker(result: .available(currentVersion: "1.0.0", latestRelease: release))
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            updateChecker: updateChecker
+        )
+
+        await viewModel.checkForUpdatesIfNeeded()
+
+        XCTAssertEqual(updateChecker.checkCallCount, 1)
+        XCTAssertEqual(viewModel.updateState, .available(currentVersion: "1.0.0", latestRelease: release))
+        XCTAssertEqual(viewModel.availableUpdate, release)
+    }
+
+    func testCheckForUpdatesStaysIdleWhenAppIsUpToDate() async {
+        let updateChecker = FakeAppUpdateChecker(result: .upToDate(currentVersion: "1.1.0", latestVersion: "1.1.0"))
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            updateChecker: updateChecker
+        )
+
+        await viewModel.checkForUpdatesIfNeeded()
+
+        XCTAssertEqual(updateChecker.checkCallCount, 1)
+        XCTAssertEqual(viewModel.updateState, .idle)
+        XCTAssertNil(viewModel.availableUpdate)
+    }
+
+    func testCheckForUpdatesFailureStaysIdleAndDoesNotBlockApp() async {
+        let updateChecker = FakeAppUpdateChecker(error: TestError.unavailable)
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            updateChecker: updateChecker
+        )
+
+        await viewModel.checkForUpdatesIfNeeded()
+
+        XCTAssertEqual(updateChecker.checkCallCount, 1)
+        XCTAssertEqual(viewModel.updateState, .idle)
+        XCTAssertEqual(viewModel.uploadState, .idle)
+    }
+
     func testTogglingExternalGroupAutomationPersistsGroupSelectionWithProject() {
         let project = makeProject(name: "Demo")
         let store = FakeProjectProfileStore()
@@ -1499,6 +1563,25 @@ private final class FakeConfigurationCheckEngine: ConfigurationCheckEngineProtoc
         lastAccount = account
         lastLanguage = language
         return results
+    }
+}
+
+private final class FakeAppUpdateChecker: AppUpdateChecking {
+    var result: AppUpdateCheckResult
+    var error: Error?
+    private(set) var checkCallCount = 0
+
+    init(result: AppUpdateCheckResult = .upToDate(currentVersion: "1.1.0", latestVersion: "1.1.0"), error: Error? = nil) {
+        self.result = result
+        self.error = error
+    }
+
+    func checkForUpdate() async throws -> AppUpdateCheckResult {
+        checkCallCount += 1
+        if let error {
+            throw error
+        }
+        return result
     }
 }
 

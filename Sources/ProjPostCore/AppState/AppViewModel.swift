@@ -115,6 +115,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var uploadEvents: [UploadEvent]
     @Published public var betaReviewState: BetaReviewSubmissionState
     @Published public var testFlightDistributionState: TestFlightDistributionState
+    @Published public var updateState: AppUpdateState
     @Published public var language: AppLanguage
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
     @Published public private(set) var projectMutationSummary: [String]
@@ -127,9 +128,11 @@ public final class AppViewModel: ObservableObject {
     private let uploadRunner: UploadJobRunning
     private let appStoreConnectClient: AppStoreConnectClientProtocol?
     private let projectMutator: ProjectMutating
+    private let updateChecker: AppUpdateChecking
     private let jwtSigner: AppStoreConnectJWTSigner
     private var appliedProjectSettingsByID: [UUID: AppliedProjectSettings]
     private var lastCheckContext: CheckContext?
+    private var hasCheckedForUpdates: Bool
 
     public init(
         store: ProjectProfileStoreProtocol = ProjectProfileStore.defaultStore(),
@@ -140,6 +143,7 @@ public final class AppViewModel: ObservableObject {
         uploadRunner: UploadJobRunning? = nil,
         appStoreConnectClient: AppStoreConnectClientProtocol? = nil,
         projectMutator: ProjectMutating? = nil,
+        updateChecker: AppUpdateChecking? = nil,
         projects: [ProjectProfile] = [],
         accountProfiles: [AppleAccountProfile] = [],
         accountDraft: AppleAccountDraft = AppleAccountDraft(),
@@ -158,6 +162,7 @@ public final class AppViewModel: ObservableObject {
         )
         self.appStoreConnectClient = appStoreConnectClient
         self.projectMutator = projectMutator ?? ProjectMutator(backupRoot: Self.defaultBackupRoot())
+        self.updateChecker = updateChecker ?? AppUpdateChecker()
         self.jwtSigner = AppStoreConnectJWTSigner()
         self.projects = projects
         self.selectedProjectID = projects.first?.id
@@ -169,11 +174,13 @@ public final class AppViewModel: ObservableObject {
         self.uploadEvents = []
         self.betaReviewState = .idle
         self.testFlightDistributionState = .idle
+        self.updateState = .idle
         self.language = language
         self.privateKeyStatus = .missing
         self.projectMutationSummary = []
         self.appliedProjectSettingsByID = Self.appliedSettingsIndex(for: projects, treatMissingBaselineAsCurrent: true)
         self.lastCheckContext = nil
+        self.hasCheckedForUpdates = false
 
         if selectedProject?.selectedAccountID != nil {
             hydrateAccountStateFromSelectedProject()
@@ -188,6 +195,11 @@ public final class AppViewModel: ObservableObject {
         return projects.first(where: { $0.id == selectedProjectID })
     }
 
+    public var availableUpdate: AppReleaseInfo? {
+        guard case let .available(_, latestRelease) = updateState else { return nil }
+        return latestRelease
+    }
+
     private var strings: AppStrings {
         AppStrings(language: language)
     }
@@ -197,6 +209,28 @@ public final class AppViewModel: ObservableObject {
         relocalizeDistributionState()
         refreshBetaReviewStatusMessageFromSnapshot()
         refreshProjectMutationState()
+    }
+
+    public func checkForUpdatesIfNeeded() async {
+        guard !hasCheckedForUpdates else { return }
+        hasCheckedForUpdates = true
+        updateState = .checking
+        do {
+            switch try await updateChecker.checkForUpdate() {
+            case let .available(currentVersion, latestRelease):
+                updateState = .available(currentVersion: currentVersion, latestRelease: latestRelease)
+            case .upToDate:
+                updateState = .idle
+            }
+        } catch {
+            updateState = .idle
+        }
+    }
+
+    public func dismissAvailableUpdate() {
+        if case .available = updateState {
+            updateState = .idle
+        }
     }
 
     public var hasYellowChecks: Bool {

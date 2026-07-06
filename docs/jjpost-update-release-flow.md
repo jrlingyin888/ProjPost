@@ -32,7 +32,7 @@ JJPost 使用 GitHub Releases 做方案 A 更新：
 确认代码版本：
 
 ```bash
-rg -n 'appVersion' Sources/ProjPostCore/Branding/ProductBranding.swift
+grep -n "appVersion" Sources/ProjPostCore/Branding/ProductBranding.swift
 ```
 
 应看到：

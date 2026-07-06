@@ -133,24 +133,30 @@ struct ProjectListView: View {
             HStack(alignment: .firstTextBaseline) {
                 Label(strings.addProject, systemImage: "plus.square.on.square")
                     .font(.headline)
+                    .lineLimit(1)
                 Spacer()
-                HStack(spacing: 8) {
-                    Picker(strings.languageTitle, selection: $localizationStore.language) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName)
-                                .tag(language)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 112)
-                    .disabled(viewModel.isOperationRunning)
-
-                    Text(ProductBranding.appVersionDisplay)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
+                Text(ProductBranding.appVersionDisplay)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
+
+            HStack {
+                Picker(strings.languageTitle, selection: $localizationStore.language) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName)
+                            .tag(language)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize(horizontal: true, vertical: false)
+                .disabled(viewModel.isOperationRunning)
+
+                Spacer()
+            }
+
             HStack {
                 Button {
                     showProjectDirectoryImporter = true

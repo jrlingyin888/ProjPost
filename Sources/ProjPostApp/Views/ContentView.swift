@@ -17,12 +17,7 @@ struct ContentView: View {
         } detail: {
             ProjectDetailView(viewModel: viewModel)
         }
-        .navigationTitle(ProductBranding.displayName)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                appTitle
-            }
-        }
+        .navigationTitle("\(ProductBranding.displayName) \(ProductBranding.appVersionDisplay)")
         .environmentObject(localizationStore)
         .onAppear {
             viewModel.updateLanguage(localizationStore.language)
@@ -53,21 +48,6 @@ struct ContentView: View {
                 Text(strings.updateAvailableMessage(currentVersion: ProductBranding.appVersion, latestVersion: release.version))
             }
         }
-    }
-
-    private var appTitle: some View {
-        HStack(spacing: 8) {
-            Text(ProductBranding.displayName)
-                .font(.headline.weight(.semibold))
-            Text(ProductBranding.appVersionDisplay)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.quaternary.opacity(0.8), in: Capsule())
-        }
-        .lineLimit(1)
-        .accessibilityElement(children: .combine)
     }
 
     private var updateAlertBinding: Binding<Bool> {

@@ -15,14 +15,13 @@ struct ContentView: View {
             ProjectListView(viewModel: viewModel)
                 .navigationSplitViewColumnWidth(min: 300, ideal: 340)
         } detail: {
-            ProjectDetailView(viewModel: viewModel)
-        }
-        .navigationTitle(ProductBranding.displayName)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                appVersionBadge
+            VStack(spacing: 0) {
+                appTitleHeader
+                Divider()
+                ProjectDetailView(viewModel: viewModel)
             }
         }
+        .navigationTitle("")
         .environmentObject(localizationStore)
         .onAppear {
             viewModel.updateLanguage(localizationStore.language)
@@ -55,16 +54,24 @@ struct ContentView: View {
         }
     }
 
-    private var appVersionBadge: some View {
-        Text(ProductBranding.appVersionDisplay)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(.quaternary.opacity(0.8), in: Capsule())
-            .fixedSize()
+    private var appTitleHeader: some View {
+        HStack(spacing: 8) {
+            Text(ProductBranding.displayName)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(ProductBranding.appVersionDisplay)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.quaternary.opacity(0.8), in: Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
         .lineLimit(1)
-            .accessibilityLabel(ProductBranding.appVersionDisplay)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(ProductBranding.titleAccessibilityLabel)
     }
 
     private var updateAlertBinding: Binding<Bool> {

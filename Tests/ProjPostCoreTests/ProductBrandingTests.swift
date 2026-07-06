@@ -6,6 +6,7 @@ final class ProductBrandingTests: XCTestCase {
         XCTAssertEqual(ProductBranding.displayName, "JJPost")
         XCTAssertEqual(ProductBranding.appVersion, "1.1.0")
         XCTAssertEqual(ProductBranding.appVersionDisplay, "v.1.1.0")
+        XCTAssertEqual(ProductBranding.titleAccessibilityLabel, "JJPost v.1.1.0")
         XCTAssertEqual(ProductBranding.bundleIdentifier, "com.jjpost.app")
         XCTAssertEqual(ProductBranding.iconFileName, "AppIcon")
         XCTAssertEqual(ProductBranding.legacyApplicationSupportDirectoryName, "ProjPost")

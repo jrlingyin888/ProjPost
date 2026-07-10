@@ -216,6 +216,9 @@ public struct AppStrings: Equatable {
 
     public var uploadConsole: String { text("Upload Console", "上传控制台") }
     public var noUploadEvents: String { text("No upload events yet.", "还没有上传事件。") }
+    public var activityConsole: String { text("Activity Console", "活动控制台") }
+    public var clearLog: String { text("Clear", "清空") }
+    public var noActivityYet: String { text("No activity yet.", "暂无活动。") }
     public var idle: String { text("Idle", "空闲") }
     public var cancelled: String { text("Cancelled", "已取消") }
     public var updatingTestFlightStatus: String { text("Updating TestFlight status...", "正在更新 TestFlight 状态...") }

@@ -28,23 +28,32 @@ struct ProjectDetailView: View {
     @State private var showWithdrawConfirm = false
     @State private var showReleaseConfirm = false
     @State private var copiedLinkGroupID: String?
+    @State private var consoleCollapsed = false
 
     private var strings: AppStrings {
         AppStrings(language: localizationStore.language)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                projectFields
-                accountFields
-                uploadActions
-                appStoreReviewActions
-                UploadProgressView(state: viewModel.uploadState, events: viewModel.uploadEvents)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    projectFields
+                    accountFields
+                    uploadActions
+                    appStoreReviewActions
+                }
+                .padding(20)
             }
-            .padding(20)
+            Divider()
+            ConsolePane(
+                entries: viewModel.activityLog,
+                isCollapsed: $consoleCollapsed,
+                onClear: { viewModel.clearActivityLog() }
+            )
         }
+        .overlay(alignment: .top) { noticeBanner }
         .task(id: viewModel.latestBuildStatusTrigger) {
             await viewModel.refreshLatestBuildTestFlightStatusIfNeeded()
         }
@@ -77,6 +86,34 @@ struct ProjectDetailView: View {
             } else {
                 EmptyView()
                     .frame(width: 520, height: 320)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var noticeBanner: some View {
+        if let notice = viewModel.notice {
+            HStack(spacing: 8) {
+                Image(systemName: notice.level == .error ? "xmark.octagon.fill" : "checkmark.circle.fill")
+                Text(notice.message).font(.callout).lineLimit(3)
+                Spacer()
+                if notice.level == .error {
+                    Button { viewModel.dismissNotice() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(
+                (notice.level == .error ? Color.red : Color.green).opacity(0.15),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .foregroundStyle(notice.level == .error ? Color.red : Color.green)
+            .padding(.horizontal, 20).padding(.top, 10)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .task(id: notice.id) {
+                guard notice.level == .success else { return }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if viewModel.notice?.id == notice.id { viewModel.dismissNotice() }
             }
         }
     }
@@ -493,6 +530,12 @@ struct ProjectDetailView: View {
 
     private var distributionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if viewModel.isBackgroundLoadingTestFlight {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(strings.updatingTestFlightStatus).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             switch viewModel.testFlightDistributionState {
             case .idle:
                 placeholderRow(title: strings.testFlightDistribution, value: strings.refreshTFStatusToLoadTesterGroups)

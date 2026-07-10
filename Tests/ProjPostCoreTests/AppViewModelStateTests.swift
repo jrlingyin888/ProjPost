@@ -1887,6 +1887,37 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(viewModel.activityLog.isEmpty)
         XCTAssertNil(viewModel.notice)
     }
+
+    func testBlockedUploadLogsErrorAndRaisesErrorNotice() async {
+        // No project selected → startUpload hits a guard and sets uploadState = .failed,
+        // which must surface as an error log entry + error notice (the "click does nothing" case).
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner()
+        )
+
+        await viewModel.startUpload()
+
+        XCTAssertEqual(viewModel.activityLog.last?.level, .error)
+        XCTAssertEqual(viewModel.notice?.level, .error)
+    }
+
+    func testUploadEventsAppendToActivityLog() {
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner()
+        )
+
+        viewModel.uploadEvents = [
+            UploadEvent(step: .archive, message: "Archived", succeeded: true),
+            UploadEvent(step: .upload, message: "Upload failed", succeeded: false)
+        ]
+
+        XCTAssertEqual(viewModel.activityLog.count, 2)
+        XCTAssertEqual(viewModel.activityLog.first?.level, .success)
+        XCTAssertEqual(viewModel.activityLog.last?.level, .error)
+        XCTAssertTrue(viewModel.activityLog.last?.message.contains("Upload failed") == true)
+    }
 }
 
 private func makeProject(

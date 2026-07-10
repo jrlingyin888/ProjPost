@@ -121,11 +121,11 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var accountProfile: AppleAccountProfile?
     @Published public var accountDraft: AppleAccountDraft
     @Published public var checkResults: [CheckResult]
-    @Published public var uploadState: UploadJobState
-    @Published public var uploadEvents: [UploadEvent]
-    @Published public var betaReviewState: BetaReviewSubmissionState
+    @Published public var uploadState: UploadJobState { didSet { logUploadStateChange(uploadState) } }
+    @Published public var uploadEvents: [UploadEvent] { didSet { logNewUploadEvents(since: oldValue) } }
+    @Published public var betaReviewState: BetaReviewSubmissionState { didSet { logBetaReviewStateChange(betaReviewState) } }
     @Published public var testFlightDistributionState: TestFlightDistributionState
-    @Published public var appStoreReviewState: AppStoreReviewState
+    @Published public var appStoreReviewState: AppStoreReviewState { didSet { logAppStoreReviewStateChange(appStoreReviewState) } }
     @Published public var updateState: AppUpdateState
     @Published public var language: AppLanguage
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
@@ -263,6 +263,39 @@ public final class AppViewModel: ObservableObject {
 
     public func dismissNotice() {
         notice = nil
+    }
+
+    private func logUploadStateChange(_ state: UploadJobState) {
+        switch state {
+        case .succeeded(let message): recordActivity(.success, message)
+        case .failed(let message): recordActivity(.error, message)
+        case .cancelled: recordActivity(.info, strings.cancelled)
+        case .idle, .running: break   // progress detail comes from uploadEvents
+        }
+    }
+
+    private func logNewUploadEvents(since oldValue: [UploadEvent]) {
+        guard uploadEvents.count > oldValue.count else { return }
+        for event in uploadEvents[oldValue.count...] {
+            recordActivity(event.succeeded ? .success : .error, "\(strings.uploadStep(event.step)): \(event.message)")
+        }
+    }
+
+    private func logBetaReviewStateChange(_ state: BetaReviewSubmissionState) {
+        switch state {
+        case .succeeded(let message): recordActivity(.success, message)
+        case .failed(let message): recordActivity(.error, message)
+        default: break
+        }
+    }
+
+    private func logAppStoreReviewStateChange(_ state: AppStoreReviewState) {
+        switch state {
+        case .succeeded(let message, _): recordActivity(.success, message)
+        case .failed(let message, _): recordActivity(.error, message)
+        case .loaded: recordActivity(.info, strings.appStoreReviewStatusRefreshed)
+        default: break
+        }
     }
 
     public var hasYellowChecks: Bool {

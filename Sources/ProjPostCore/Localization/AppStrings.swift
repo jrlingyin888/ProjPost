@@ -185,6 +185,7 @@ public struct AppStrings: Equatable {
         text("The first two actions update App Store Connect version data, but do not submit for review.", "前两步会更新 App Store Connect 版本资料，但不会提交审核。")
     }
     public var appStoreReviewStatusSubmitted: String { text("Submitted", "已提交") }
+    public var appStoreReviewStatusRefreshed: String { text("Store review info updated", "商店审核信息已更新") }
     public var submitForReview: String { text("Submit for Review", "提交审核") }
     public var submittingForReview: String { text("Submitting…", "提交中…") }
     public var withdrawReview: String { text("Withdraw", "撤销提审") }

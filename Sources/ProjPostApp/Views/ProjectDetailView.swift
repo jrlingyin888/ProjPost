@@ -449,6 +449,8 @@ struct ProjectDetailView: View {
                             .font(.caption)
                         if let detail = item.detail, !detail.isEmpty {
                             Text(detail).font(.caption).foregroundStyle(.secondary)
+                        } else if item.kind == .screenshotsPresent && item.severity == .yellow {
+                            Text(strings.readinessScreenshotsHint).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }

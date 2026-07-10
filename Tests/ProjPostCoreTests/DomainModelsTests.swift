@@ -97,6 +97,18 @@ final class DomainModelsTests: XCTestCase {
         XCTAssertEqual(items.first(where: { $0.kind == .whatsNewFilled })?.severity, .green)
     }
 
+    func testReadinessPartialWhatsNewWarnsYellowNotBlock() {
+        let locs = [
+            ASCAppStoreVersionLocalization(id: "l1", locale: "zh-Hans", description: nil, keywords: nil, marketingURL: nil, promotionalText: nil, supportURL: nil, whatsNew: "新内容"),
+            ASCAppStoreVersionLocalization(id: "l2", locale: "en-US", description: nil, keywords: nil, marketingURL: nil, promotionalText: nil, supportURL: nil, whatsNew: "   ")
+        ]
+        let items = AppStoreReviewReadiness.evaluate(snapshot: makeReviewSnapshot(localizations: locs))
+        let item = items.first(where: { $0.kind == .whatsNewFilled })
+        XCTAssertEqual(item?.severity, .yellow)
+        XCTAssertEqual(item?.detail, "en-US")
+        XCTAssertFalse(AppStoreReviewReadiness.blocks(items))
+    }
+
     func testReadinessMissingScreenshotsWarnsYellowNotBlock() {
         let items = AppStoreReviewReadiness.evaluate(snapshot: makeReviewSnapshot(screenshotSets: []))
         XCTAssertEqual(items.first(where: { $0.kind == .screenshotsPresent })?.severity, .yellow)

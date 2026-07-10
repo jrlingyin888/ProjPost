@@ -451,6 +451,8 @@ public enum AppStoreReviewPhase: Equatable {
 
     public init(versionState: String?, submissionState: String?) {
         switch submissionState {
+        // READY_FOR_REVIEW also covers a not-yet-submitted (dangling) submission, so it maps to
+        // .inReview too — the UI should offer Withdraw rather than a second Submit.
         case "READY_FOR_REVIEW", "WAITING_FOR_REVIEW", "IN_REVIEW", "UNRESOLVED_ISSUES":
             self = .inReview
             return

@@ -985,6 +985,8 @@ public final class AppViewModel: ObservableObject {
             }
 
             let submissionID: String
+            // Retry-after-failed-submit path: a dangling READY_FOR_REVIEW submission means its item was
+            // already created before an earlier failure, so reuse it instead of creating a second one.
             if let existing = try await client.fetchActiveReviewSubmission(appID: snapshot.appID), existing.state == "READY_FOR_REVIEW" {
                 submissionID = existing.id
             } else {

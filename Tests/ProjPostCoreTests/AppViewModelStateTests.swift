@@ -1071,6 +1071,8 @@ final class AppViewModelStateTests: XCTestCase {
         await viewModel.releaseApprovedVersion()
 
         XCTAssertEqual(appStoreConnect.releasedAppStoreVersionIDs, ["version-123"])
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else { return XCTFail("expected loaded") }
+        XCTAssertEqual(snapshot.versionString, "1.2.6")
     }
 
     func testAutomaticChecksRunOnceWhenReady() async {

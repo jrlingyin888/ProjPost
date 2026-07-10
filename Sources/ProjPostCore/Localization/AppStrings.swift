@@ -28,6 +28,7 @@ public struct AppStrings: Equatable {
     public var scanning: String { text("Scanning", "扫描中") }
     public var chooseOrDropProjectFolderHelp: String { text("Choose or drop a project folder", "选择或拖入项目文件夹") }
     public var cancel: String { text("Cancel", "取消") }
+    public var close: String { text("Close", "关闭") }
     public var delete: String { text("Delete", "删除") }
     public var deleteSelectedProjectsTitle: String { text("Delete Selected Projects?", "删除选中的项目？") }
     public var selectAProject: String { text("Select a project", "选择项目") }
@@ -129,6 +130,59 @@ public struct AppStrings: Equatable {
     public var notLinked: String { text("Not Linked", "未关联") }
     public var publicLinkPendingFromApple: String { text("Public link pending from Apple.", "公开链接等待 Apple 生成。") }
     public var publicLinkNotEnabled: String { text("Public link not enabled.", "公开链接未开启。") }
+
+    public var appStoreReview: String { text("App Store Review", "App Store 提审") }
+    public var refreshStoreStatus: String { text("Refresh Store Status", "刷新商店状态") }
+    public var prepareStoreVersion: String { text("Create/Load Version", "创建/载入版本") }
+    public var bindSelectedBuild: String { text("Bind Selected Build", "绑定所选 Build") }
+    public var submitStoreReview: String { text("Submit Store Review", "提交商店审核") }
+    public var storeVersion: String { text("Store version", "商店版本") }
+    public var selectedBuild: String { text("Selected Build", "选择 Build") }
+    public var releaseStrategy: String { text("Release strategy", "发布策略") }
+    public var manualRelease: String { text("Manual", "手动") }
+    public var afterApprovalRelease: String { text("After Approval", "通过后自动") }
+    public var scheduledRelease: String { text("Scheduled", "定时") }
+    public var buildBound: String { text("Build bound", "构建已绑定") }
+    public var buildNotBound: String { text("Build not bound", "构建未绑定") }
+    public var appStoreReviewInfo: String { text("Review Information", "审核信息") }
+    public var editReviewInfo: String { text("Edit Review Info", "编辑审核信息") }
+    public var storeLocalizations: String { text("Store Localizations", "商店语言") }
+    public var storeLocalizationsSubtitle: String {
+        text("App Store-facing localizations, separate from in-app languages", "App Store 对外多语言，不影响 App 内语言")
+    }
+    public var manageLanguages: String { text("Manage Languages", "管理语言") }
+    public var whatsNew: String { text("What's New", "版本更新说明") }
+    public var needsUpdate: String { text("Needs Update", "需更新") }
+    public var filled: String { text("Filled", "已填") }
+    public var advancedStoreFields: String { text("Advanced: description / keywords / screenshots", "高级：描述 / 关键词 / 截图") }
+    public var appStoreDescription: String { text("Description", "描述") }
+    public var appStoreKeywords: String { text("Keywords", "关键词") }
+    public var appStorePromotionalText: String { text("Promotional Text", "宣传文本") }
+    public var appStoreSupportURL: String { text("Support URL", "支持 URL") }
+    public var appStoreMarketingURL: String { text("Marketing URL", "营销 URL") }
+    public var appStoreScreenshots: String { text("Screenshots", "截图") }
+    public var chooseScreenshots: String { text("Choose Screenshots", "选择截图") }
+    public var existingScreenshots: String { text("Existing Screenshots", "已有截图") }
+    public var noScreenshots: String { text("No screenshots", "暂无截图") }
+    public var localDraft: String { text("Local Draft", "本地草稿") }
+    public var contactInfo: String { text("Contact", "联系信息") }
+    public var demoAccount: String { text("Demo Account", "Demo 账号") }
+    public var reviewNotes: String { text("Review Notes", "审核备注") }
+    public var requiresLogin: String { text("Requires Login", "需要登录") }
+    public var firstName: String { text("First Name", "名字") }
+    public var lastName: String { text("Last Name", "姓氏") }
+    public var phone: String { text("Phone", "电话") }
+    public var email: String { text("Email", "邮箱") }
+    public var password: String { text("Password", "密码") }
+    public var showPassword: String { text("Show Password", "显示密码") }
+    public var hidePassword: String { text("Hide Password", "隐藏密码") }
+    public var appStoreReviewNoVersionLoaded: String {
+        text("Refresh status or create/load a store version first.", "请先刷新状态，或创建/载入商店版本。")
+    }
+    public var appStoreReviewSafeActionHint: String {
+        text("The first two actions update App Store Connect version data, but do not submit for review.", "前两步会更新 App Store Connect 版本资料，但不会提交审核。")
+    }
+    public var appStoreReviewStatusSubmitted: String { text("Submitted", "已提交") }
 
     public var uploadConsole: String { text("Upload Console", "上传控制台") }
     public var noUploadEvents: String { text("No upload events yet.", "还没有上传事件。") }
@@ -332,6 +386,46 @@ public struct AppStrings: Equatable {
 
     public func refreshTestFlightDistributionFailed(_ error: Error) -> String {
         text("Refresh TestFlight distribution failed: \(error)", "刷新 TestFlight 分发信息失败：\(error)")
+    }
+
+    public var bundleVersionRequiredBeforeAppStoreReview: String {
+        text("Bundle ID and version are required before App Store review actions.", "执行 App Store 提审操作前需要 Bundle ID 和版本号。")
+    }
+
+    public func appStoreVersionNotFound(_ version: String) -> String {
+        text("App Store version \(version) was not found. Create/load the version first.", "未找到商店版本 \(version)。请先创建/载入版本。")
+    }
+
+    public var selectBuildBeforeAppStoreReviewAction: String {
+        text("Select a build before continuing.", "请先选择一个 Build。")
+    }
+
+    public var loadAppStoreVersionBeforeAction: String {
+        text("Create or load an App Store version before continuing.", "请先创建或载入商店版本。")
+    }
+
+    public var bindSelectedBuildBeforeSubmittingAppStoreReview: String {
+        text("Bind the selected build before submitting App Store review.", "提交商店审核前请先绑定所选 Build。")
+    }
+
+    public func refreshAppStoreReviewFailed(_ error: Error) -> String {
+        text("Refresh App Store review status failed: \(error)", "刷新 App Store 提审状态失败：\(error)")
+    }
+
+    public func appStoreReviewBindBuildFailed(_ error: Error) -> String {
+        text("Bind App Store build failed: \(error)", "绑定 App Store Build 失败：\(error)")
+    }
+
+    public func appStoreReviewSaveFailed(_ error: Error) -> String {
+        text("Save App Store review metadata failed: \(error)", "保存 App Store 提审资料失败：\(error)")
+    }
+
+    public func appStoreReviewSubmitted(state: String) -> String {
+        text("Submitted to App Store review. State: \(state)", "已提交商店审核。状态：\(state)")
+    }
+
+    public func appStoreReviewSubmitFailed(_ error: Error) -> String {
+        text("Submit App Store review failed: \(error)", "提交商店审核失败：\(error)")
     }
 
     public var selectProjectBeforeLinkingExternalGroups: String {

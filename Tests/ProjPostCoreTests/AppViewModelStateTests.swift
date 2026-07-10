@@ -612,6 +612,267 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.betaReviewState, .failed(message: "Linked external groups with 1 failure."))
     }
 
+    func testRefreshAppStoreReviewStatusDefaultsSelectedBuildFromLastSuccessfulUpload() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        project.lastUpload = UploadSummary(version: "1.2.6", buildNumber: "2", uploadedAt: Date(), succeeded: true, message: "Uploaded")
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [
+                ASCBuild(id: "build-1", version: "1", processingState: "VALID"),
+                ASCBuild(id: "build-2", version: "2", processingState: "VALID"),
+                ASCBuild(id: "build-3", version: "3", processingState: "VALID")
+            ],
+            appStoreVersions: [
+                ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")
+            ],
+            boundAppStoreVersionBuildIDs: ["version-123": "build-1"],
+            appStoreReviewDetail: ASCAppStoreReviewDetail(
+                id: "review-detail-123",
+                contactFirstName: "Jerry",
+                contactLastName: "Pop",
+                contactPhone: "+82 10-0000-0000",
+                contactEmail: "jerry@example.com",
+                demoAccountName: "demo@example.com",
+                demoAccountPassword: nil,
+                demoAccountRequired: true,
+                notes: "Use demo account."
+            ),
+            appStoreVersionLocalizations: [
+                ASCAppStoreVersionLocalization(
+                    id: "loc-zh",
+                    locale: "zh-Hans",
+                    description: "介绍",
+                    keywords: "工具",
+                    marketingURL: nil,
+                    promotionalText: nil,
+                    supportURL: "https://example.com/support",
+                    whatsNew: "修复问题"
+                )
+            ],
+            appScreenshotSetsByLocalizationID: [
+                "loc-zh": [
+                    ASCAppScreenshotSet(id: "set-iphone-65", screenshotDisplayType: "APP_IPHONE_65")
+                ]
+            ],
+            appScreenshotsBySetID: [
+                "set-iphone-65": [
+                    ASCAppScreenshot(
+                        id: "shot-1",
+                        fileName: "screen1.png",
+                        fileSize: 12345,
+                        imageURLTemplate: "https://example.com/{w}x{h}.png",
+                        width: 1242,
+                        height: 2688,
+                        assetDeliveryState: "COMPLETE"
+                    )
+                ]
+            ]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshAppStoreReviewStatus()
+
+        XCTAssertEqual(appStoreConnect.fetchBuildRequests, [
+            FakeAppStoreConnectClient.FetchBuildRequest(appID: "app-123", appVersion: "1.2.6", buildNumber: nil)
+        ])
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else {
+            return XCTFail("Expected loaded App Store review snapshot")
+        }
+        XCTAssertEqual(snapshot.versionString, "1.2.6")
+        XCTAssertEqual(snapshot.selectedBuildID, "build-2")
+        XCTAssertEqual(snapshot.boundBuildID, "build-1")
+        XCTAssertEqual(snapshot.builds.map(\.buildNumber), ["1", "2", "3"])
+        XCTAssertEqual(snapshot.reviewDetail?.contactEmail, "jerry@example.com")
+        XCTAssertEqual(snapshot.localizations.map(\.locale), ["zh-Hans"])
+        XCTAssertEqual(appStoreConnect.fetchedScreenshotSetLocalizationIDs, ["loc-zh"])
+        XCTAssertEqual(appStoreConnect.fetchedScreenshotSetIDs, ["set-iphone-65"])
+        XCTAssertEqual(snapshot.screenshotSets, [
+            AppStoreReviewScreenshotSet(
+                id: "set-iphone-65",
+                localizationID: "loc-zh",
+                locale: "zh-Hans",
+                screenshotDisplayType: "APP_IPHONE_65",
+                screenshots: [
+                    ASCAppScreenshot(
+                        id: "shot-1",
+                        fileName: "screen1.png",
+                        fileSize: 12345,
+                        imageURLTemplate: "https://example.com/{w}x{h}.png",
+                        width: 1242,
+                        height: 2688,
+                        assetDeliveryState: "COMPLETE"
+                    )
+                ]
+            )
+        ])
+    }
+
+    func testSaveAppStoreReviewAdvancedDraftUpdatesRemoteFieldsAndRefreshesSnapshot() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [
+                ASCBuild(id: "build-1", version: "1", processingState: "VALID")
+            ],
+            appStoreVersions: [
+                ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")
+            ],
+            appStoreReviewDetail: ASCAppStoreReviewDetail(
+                id: "review-detail-123",
+                contactFirstName: "old",
+                contactLastName: "name",
+                contactPhone: "100",
+                contactEmail: "old@example.com",
+                demoAccountName: "old-demo",
+                demoAccountPassword: "old-pass",
+                demoAccountRequired: true,
+                notes: "old notes"
+            ),
+            appStoreVersionLocalizations: [
+                ASCAppStoreVersionLocalization(
+                    id: "loc-zh",
+                    locale: "zh-Hans",
+                    description: "旧描述",
+                    keywords: "旧关键词",
+                    marketingURL: nil,
+                    promotionalText: nil,
+                    supportURL: "https://old.example.com/support",
+                    whatsNew: "旧更新"
+                )
+            ]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+
+        await viewModel.saveAppStoreReviewAdvancedDraft(
+            AppStoreReviewAdvancedDraft(
+                reviewDetailID: "review-detail-123",
+                reviewDetailUpdate: ASCAppStoreReviewDetailUpdate(
+                    contactFirstName: "ye",
+                    contactLastName: "zhina",
+                    contactPhone: "+861777",
+                    contactEmail: "mdc@example.com",
+                    demoAccountName: "13662388632",
+                    demoAccountPassword: "123456",
+                    demoAccountRequired: true,
+                    notes: "新备注"
+                ),
+                localizationUpdates: [
+                    AppStoreReviewLocalizationUpdate(
+                        localizationID: "loc-zh",
+                        update: ASCAppStoreVersionLocalizationUpdate(
+                            description: "新描述",
+                            keywords: "新关键词",
+                            marketingURL: "https://example.com",
+                            promotionalText: "新宣传",
+                            supportURL: "https://example.com/support",
+                            whatsNew: "新版本更新内容"
+                        )
+                    )
+                ]
+            )
+        )
+
+        XCTAssertEqual(appStoreConnect.updatedLocalizations.count, 1)
+        XCTAssertEqual(appStoreConnect.updatedLocalizations.first?.localizationID, "loc-zh")
+        XCTAssertEqual(appStoreConnect.updatedLocalizations.first?.update.whatsNew, "新版本更新内容")
+        XCTAssertEqual(appStoreConnect.updatedReviewDetails.count, 1)
+        XCTAssertEqual(appStoreConnect.updatedReviewDetails.first?.reviewDetailID, "review-detail-123")
+        XCTAssertEqual(appStoreConnect.updatedReviewDetails.first?.update.demoAccountPassword, "123456")
+
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else {
+            return XCTFail("Expected refreshed App Store review snapshot")
+        }
+        XCTAssertEqual(snapshot.localizations.first?.whatsNew, "新版本更新内容")
+        XCTAssertEqual(snapshot.localizations.first?.description, "新描述")
+        XCTAssertEqual(snapshot.reviewDetail?.contactEmail, "mdc@example.com")
+        XCTAssertEqual(snapshot.reviewDetail?.demoAccountPassword, "123456")
+    }
+
+    func testBindSelectedAppStoreBuildUsesUserSelectedBuild() async {
+        let account = AppleAccountProfile(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            displayName: "Company",
+            keyID: "KEY1234567",
+            issuerID: "issuer",
+            teamID: "TEAM123",
+            lastVerifiedAt: nil
+        )
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [
+                ASCBuild(id: "build-1", version: "1", processingState: "VALID"),
+                ASCBuild(id: "build-2", version: "2", processingState: "VALID"),
+                ASCBuild(id: "build-3", version: "3", processingState: "VALID")
+            ],
+            appStoreVersions: [
+                ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")
+            ],
+            boundAppStoreVersionBuildIDs: ["version-123": "build-1"]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(),
+            accountStore: FakeAppleAccountProfileStore(),
+            credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(),
+            checkEngine: FakeConfigurationCheckEngine(),
+            uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect,
+            projects: [project],
+            accountProfiles: [account]
+        )
+
+        await viewModel.refreshAppStoreReviewStatus()
+        viewModel.selectAppStoreReviewBuild("build-3")
+        await viewModel.bindSelectedAppStoreReviewBuild()
+
+        XCTAssertEqual(appStoreConnect.updatedAppStoreVersionBuilds, [
+            FakeAppStoreConnectClient.UpdatedAppStoreVersionBuild(appStoreVersionID: "version-123", buildID: "build-3")
+        ])
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else {
+            return XCTFail("Expected loaded App Store review snapshot")
+        }
+        XCTAssertEqual(snapshot.selectedBuildID, "build-3")
+        XCTAssertEqual(snapshot.boundBuildID, "build-3")
+    }
+
     func testAutomaticChecksRunOnceWhenReady() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
@@ -1409,6 +1670,11 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         var buildNumber: String?
     }
 
+    struct UpdatedAppStoreVersionBuild: Equatable {
+        var appStoreVersionID: String
+        var buildID: String
+    }
+
     var app: ASCApp?
     var bundle: ASCBundleID?
     var builds: [ASCBuild]
@@ -1416,6 +1682,14 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var buildsByBetaGroupID: [String: [ASCBuild]]
     var betaReviewSubmissionsByBuildID: [String: ASCBetaReviewSubmission]
     var submission: ASCBetaReviewSubmission
+    var appStoreVersions: [ASCAppStoreVersion]
+    var boundAppStoreVersionBuildIDs: [String: String]
+    var appStoreReviewDetail: ASCAppStoreReviewDetail?
+    var appStoreVersionLocalizations: [ASCAppStoreVersionLocalization]
+    var appScreenshotSetsByLocalizationID: [String: [ASCAppScreenshotSet]]
+    var appScreenshotsBySetID: [String: [ASCAppScreenshot]]
+    var reviewSubmission: ASCReviewSubmission
+    var reviewSubmissionItem: ASCReviewSubmissionItem
     var addBuildFailuresByGroupID: [String: Error] = [:]
     var enablePublicLinkFailuresByGroupID: [String: Error] = [:]
     private(set) var fetchAppBundleIDs: [String] = []
@@ -1425,6 +1699,19 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     private(set) var addedBuildsToGroups: [(buildID: String, betaGroupID: String)] = []
     private(set) var enabledPublicLinks: [(betaGroupID: String, limit: Int?)] = []
     private(set) var submittedBuildIDs: [String] = []
+    private(set) var fetchedAppStoreVersionsForAppIDs: [String] = []
+    private(set) var createdAppStoreVersions: [(appID: String, versionString: String, releaseType: String?)] = []
+    private(set) var fetchedBoundBuildVersionIDs: [String] = []
+    private(set) var updatedAppStoreVersionBuilds: [UpdatedAppStoreVersionBuild] = []
+    private(set) var fetchedReviewDetailVersionIDs: [String] = []
+    private(set) var fetchedLocalizationVersionIDs: [String] = []
+    private(set) var updatedLocalizations: [(localizationID: String, update: ASCAppStoreVersionLocalizationUpdate)] = []
+    private(set) var updatedReviewDetails: [(reviewDetailID: String, update: ASCAppStoreReviewDetailUpdate)] = []
+    private(set) var fetchedScreenshotSetLocalizationIDs: [String] = []
+    private(set) var fetchedScreenshotSetIDs: [String] = []
+    private(set) var createdReviewSubmissionAppIDs: [String] = []
+    private(set) var createdReviewSubmissionItems: [(reviewSubmissionID: String, appStoreVersionID: String)] = []
+    private(set) var submittedReviewSubmissionIDs: [String] = []
 
     init(
         app: ASCApp? = nil,
@@ -1433,7 +1720,15 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         betaGroups: [ASCBetaGroup] = [],
         buildsByBetaGroupID: [String: [ASCBuild]] = [:],
         betaReviewSubmissionsByBuildID: [String: ASCBetaReviewSubmission] = [:],
-        submission: ASCBetaReviewSubmission = ASCBetaReviewSubmission(id: "submission", betaReviewState: nil)
+        submission: ASCBetaReviewSubmission = ASCBetaReviewSubmission(id: "submission", betaReviewState: nil),
+        appStoreVersions: [ASCAppStoreVersion] = [],
+        boundAppStoreVersionBuildIDs: [String: String] = [:],
+        appStoreReviewDetail: ASCAppStoreReviewDetail? = nil,
+        appStoreVersionLocalizations: [ASCAppStoreVersionLocalization] = [],
+        appScreenshotSetsByLocalizationID: [String: [ASCAppScreenshotSet]] = [:],
+        appScreenshotsBySetID: [String: [ASCAppScreenshot]] = [:],
+        reviewSubmission: ASCReviewSubmission = ASCReviewSubmission(id: "review-submission", state: "READY_FOR_REVIEW"),
+        reviewSubmissionItem: ASCReviewSubmissionItem = ASCReviewSubmissionItem(id: "review-item", state: "READY_FOR_REVIEW")
     ) {
         self.app = app
         self.bundle = bundle
@@ -1442,6 +1737,14 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         self.buildsByBetaGroupID = buildsByBetaGroupID
         self.betaReviewSubmissionsByBuildID = betaReviewSubmissionsByBuildID
         self.submission = submission
+        self.appStoreVersions = appStoreVersions
+        self.boundAppStoreVersionBuildIDs = boundAppStoreVersionBuildIDs
+        self.appStoreReviewDetail = appStoreReviewDetail
+        self.appStoreVersionLocalizations = appStoreVersionLocalizations
+        self.appScreenshotSetsByLocalizationID = appScreenshotSetsByLocalizationID
+        self.appScreenshotsBySetID = appScreenshotsBySetID
+        self.reviewSubmission = reviewSubmission
+        self.reviewSubmissionItem = reviewSubmissionItem
     }
 
     func fetchApp(bundleID: String) async throws -> ASCApp? {
@@ -1497,6 +1800,104 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission {
         submittedBuildIDs.append(buildID)
         return submission
+    }
+
+    func fetchAppStoreVersions(appID: String) async throws -> [ASCAppStoreVersion] {
+        fetchedAppStoreVersionsForAppIDs.append(appID)
+        return appStoreVersions
+    }
+
+    func createAppStoreVersion(appID: String, versionString: String, releaseType: String?) async throws -> ASCAppStoreVersion {
+        createdAppStoreVersions.append((appID, versionString, releaseType))
+        let version = ASCAppStoreVersion(id: "created-\(versionString)", versionString: versionString, state: "PREPARE_FOR_SUBMISSION", releaseType: releaseType)
+        appStoreVersions.append(version)
+        return version
+    }
+
+    func fetchAppStoreVersionBuildID(appStoreVersionID: String) async throws -> String? {
+        fetchedBoundBuildVersionIDs.append(appStoreVersionID)
+        return boundAppStoreVersionBuildIDs[appStoreVersionID]
+    }
+
+    func updateAppStoreVersionBuild(appStoreVersionID: String, buildID: String) async throws {
+        updatedAppStoreVersionBuilds.append(UpdatedAppStoreVersionBuild(appStoreVersionID: appStoreVersionID, buildID: buildID))
+        boundAppStoreVersionBuildIDs[appStoreVersionID] = buildID
+    }
+
+    func fetchAppStoreReviewDetail(appStoreVersionID: String) async throws -> ASCAppStoreReviewDetail? {
+        fetchedReviewDetailVersionIDs.append(appStoreVersionID)
+        return appStoreReviewDetail
+    }
+
+    func fetchAppStoreVersionLocalizations(appStoreVersionID: String) async throws -> [ASCAppStoreVersionLocalization] {
+        fetchedLocalizationVersionIDs.append(appStoreVersionID)
+        return appStoreVersionLocalizations
+    }
+
+    func updateAppStoreVersionLocalization(
+        localizationID: String,
+        update: ASCAppStoreVersionLocalizationUpdate
+    ) async throws -> ASCAppStoreVersionLocalization {
+        updatedLocalizations.append((localizationID, update))
+        let locale = appStoreVersionLocalizations.first(where: { $0.id == localizationID })?.locale ?? "en-US"
+        let updated = ASCAppStoreVersionLocalization(
+            id: localizationID,
+            locale: locale,
+            description: update.description,
+            keywords: update.keywords,
+            marketingURL: update.marketingURL,
+            promotionalText: update.promotionalText,
+            supportURL: update.supportURL,
+            whatsNew: update.whatsNew
+        )
+        appStoreVersionLocalizations.removeAll { $0.id == localizationID }
+        appStoreVersionLocalizations.append(updated)
+        return updated
+    }
+
+    func updateAppStoreReviewDetail(
+        reviewDetailID: String,
+        update: ASCAppStoreReviewDetailUpdate
+    ) async throws -> ASCAppStoreReviewDetail {
+        updatedReviewDetails.append((reviewDetailID, update))
+        let updated = ASCAppStoreReviewDetail(
+            id: reviewDetailID,
+            contactFirstName: update.contactFirstName,
+            contactLastName: update.contactLastName,
+            contactPhone: update.contactPhone,
+            contactEmail: update.contactEmail,
+            demoAccountName: update.demoAccountName,
+            demoAccountPassword: update.demoAccountPassword,
+            demoAccountRequired: update.demoAccountRequired,
+            notes: update.notes
+        )
+        appStoreReviewDetail = updated
+        return updated
+    }
+
+    func fetchAppScreenshotSets(appStoreVersionLocalizationID: String) async throws -> [ASCAppScreenshotSet] {
+        fetchedScreenshotSetLocalizationIDs.append(appStoreVersionLocalizationID)
+        return appScreenshotSetsByLocalizationID[appStoreVersionLocalizationID] ?? []
+    }
+
+    func fetchAppScreenshots(appScreenshotSetID: String) async throws -> [ASCAppScreenshot] {
+        fetchedScreenshotSetIDs.append(appScreenshotSetID)
+        return appScreenshotsBySetID[appScreenshotSetID] ?? []
+    }
+
+    func createReviewSubmission(appID: String) async throws -> ASCReviewSubmission {
+        createdReviewSubmissionAppIDs.append(appID)
+        return reviewSubmission
+    }
+
+    func createReviewSubmissionItem(reviewSubmissionID: String, appStoreVersionID: String) async throws -> ASCReviewSubmissionItem {
+        createdReviewSubmissionItems.append((reviewSubmissionID, appStoreVersionID))
+        return reviewSubmissionItem
+    }
+
+    func submitReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
+        submittedReviewSubmissionIDs.append(reviewSubmissionID)
+        return ASCReviewSubmission(id: reviewSubmissionID, state: "WAITING_FOR_REVIEW")
     }
 }
 

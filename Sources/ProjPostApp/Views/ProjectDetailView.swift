@@ -23,6 +23,7 @@ struct ProjectDetailView: View {
     @State private var activeAccountFileImport: AccountFileImport?
     @State private var isEditingSavedAccount = false
     @State private var showAppleAccountGuide = false
+    @State private var showAdvancedStoreFields = false
 
     private var strings: AppStrings {
         AppStrings(language: localizationStore.language)
@@ -35,6 +36,7 @@ struct ProjectDetailView: View {
                 projectFields
                 accountFields
                 uploadActions
+                appStoreReviewActions
                 UploadProgressView(state: viewModel.uploadState, events: viewModel.uploadEvents)
             }
             .padding(20)
@@ -57,6 +59,18 @@ struct ProjectDetailView: View {
         }
         .sheet(isPresented: $showAppleAccountGuide) {
             AppleAccountGuideView()
+        }
+        .sheet(isPresented: $showAdvancedStoreFields) {
+            if let snapshot = appStoreReviewSnapshot {
+                AppStoreAdvancedFieldsSheet(
+                    snapshot: snapshot,
+                    strings: strings,
+                    onSave: saveAppStoreReviewAdvancedDraft
+                )
+            } else {
+                EmptyView()
+                    .frame(width: 520, height: 320)
+            }
         }
     }
 
@@ -311,6 +325,76 @@ struct ProjectDetailView: View {
         }
     }
 
+    private var appStoreReviewActions: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button {
+                        Task {
+                            await viewModel.refreshAppStoreReviewStatus()
+                        }
+                    } label: {
+                        Label(strings.refreshStoreStatus, systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canQueryAppStoreReviewStatus || viewModel.isOperationRunning)
+
+                    Button {
+                        Task {
+                            await viewModel.prepareAppStoreReviewVersion()
+                        }
+                    } label: {
+                        appStoreReviewOperationLabel(title: strings.prepareStoreVersion, systemImage: "square.stack.3d.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canQueryAppStoreReviewStatus || viewModel.isOperationRunning)
+
+                    Button {
+                        Task {
+                            await viewModel.bindSelectedAppStoreReviewBuild()
+                        }
+                    } label: {
+                        appStoreReviewOperationLabel(title: strings.bindSelectedBuild, systemImage: "link")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canBindSelectedAppStoreBuild)
+
+                    Spacer()
+
+                    Button {
+                        Task {
+                            await viewModel.submitSelectedAppStoreReview()
+                        }
+                    } label: {
+                        appStoreReviewOperationLabel(title: strings.submitStoreReview, systemImage: "paperplane.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSubmitAppStoreReview)
+                }
+
+                Text(strings.appStoreReviewSafeActionHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let appStoreReviewStatusText {
+                    Text(appStoreReviewStatusText)
+                        .font(.caption)
+                        .foregroundStyle(appStoreReviewStatusColor)
+                }
+
+                Divider()
+
+                if let snapshot = appStoreReviewSnapshot {
+                    appStoreReviewSnapshotView(snapshot)
+                } else {
+                    placeholderRow(title: strings.appStoreReview, value: strings.appStoreReviewNoVersionLoaded)
+                }
+            }
+        } label: {
+            Label(strings.appStoreReview, systemImage: "app.badge")
+        }
+    }
+
     private var distributionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             switch viewModel.testFlightDistributionState {
@@ -462,6 +546,204 @@ struct ProjectDetailView: View {
             return .secondary
         }
         return group.publicLinkEnabled ? .green : .secondary
+    }
+
+    private func appStoreReviewSnapshotView(_ snapshot: AppStoreReviewSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(strings.storeVersion)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(snapshot.versionString)
+                            .font(.callout.weight(.semibold))
+                        if let versionState = snapshot.versionState {
+                            Text(readableAppStoreVersionState(versionState))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.orange.opacity(0.12), in: Capsule())
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(strings.selectedBuild)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(strings.selectedBuild, selection: appStoreBuildSelectionBinding) {
+                        Text(strings.none)
+                            .tag(Optional<String>.none)
+                        ForEach(snapshot.builds) { build in
+                            Text(appStoreBuildOptionText(build))
+                                .tag(Optional(build.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 240)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(strings.releaseStrategy)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    releaseStrategyBadge(snapshot.releaseType)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(snapshot.boundBuildID == snapshot.selectedBuildID && snapshot.selectedBuildID != nil ? strings.buildBound : strings.buildNotBound)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(snapshot.boundBuildID == snapshot.selectedBuildID && snapshot.selectedBuildID != nil ? .green : .orange)
+                    if let selected = snapshot.builds.first(where: { $0.id == snapshot.selectedBuildID }) {
+                        Text("Build \(selected.buildNumber)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            appStoreReviewInfoView(snapshot.reviewDetail)
+            appStoreLocalizationsView(snapshot.localizations)
+        }
+    }
+
+    private func appStoreReviewInfoView(_ detail: ASCAppStoreReviewDetail?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(strings.appStoreReviewInfo)
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Button {
+                    showAdvancedStoreFields = true
+                } label: {
+                    Label(strings.editReviewInfo, systemImage: "pencil")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if let detail {
+                let contact = [
+                    detail.contactFirstName,
+                    detail.contactLastName,
+                    detail.contactEmail,
+                    detail.contactPhone
+                ]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · ")
+                Text(contact.isEmpty ? "-" : contact)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("\(strings.account): \(detail.demoAccountRequired == true ? (detail.demoAccountName ?? "-") : strings.none) · notes \(detail.notes?.isEmpty == false ? strings.filled : "-")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("-")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func appStoreLocalizationsView(_ localizations: [ASCAppStoreVersionLocalization]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strings.storeLocalizations)
+                    .font(.callout.weight(.semibold))
+                Text(strings.storeLocalizationsSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    showAdvancedStoreFields = true
+                } label: {
+                    Label(strings.manageLanguages, systemImage: "globe")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if localizations.isEmpty {
+                Text("-")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(localizations, id: \.id) { localization in
+                            HStack(spacing: 6) {
+                                Text(localization.locale)
+                                    .font(.caption.weight(.semibold))
+                                Text(localization.whatsNew?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? strings.filled : strings.needsUpdate)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(localization.whatsNew?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? .green : .orange)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background((localization.whatsNew?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? Color.green : Color.orange).opacity(0.12), in: Capsule())
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                }
+
+                if let firstLocalization = localizations.first {
+                    placeholderRow(title: strings.whatsNew, value: firstLocalization.whatsNew ?? "-")
+                }
+
+                Button {
+                    showAdvancedStoreFields = true
+                } label: {
+                    Label(strings.advancedStoreFields, systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func releaseStrategyBadge(_ releaseType: String?) -> some View {
+        let text: String
+        switch releaseType {
+        case "AFTER_APPROVAL":
+            text = strings.afterApprovalRelease
+        case "SCHEDULED":
+            text = strings.scheduledRelease
+        default:
+            text = strings.manualRelease
+        }
+
+        return Text(text)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
+    }
+
+    private func appStoreBuildOptionText(_ build: AppStoreReviewBuildOption) -> String {
+        var parts = ["\(build.buildNumber)"]
+        if let processingState = build.processingState {
+            parts.append(processingState)
+        }
+        if build.isBound {
+            parts.append(strings.buildBound)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func readableAppStoreVersionState(_ state: String) -> String {
+        state
+            .split(separator: "_")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
+            .joined(separator: " ")
     }
 
     @ViewBuilder
@@ -704,6 +986,98 @@ struct ProjectDetailView: View {
         }
     }
 
+    private var appStoreReviewSnapshot: AppStoreReviewSnapshot? {
+        switch viewModel.appStoreReviewState {
+        case .loaded(let snapshot):
+            return snapshot
+        case .preparing(let snapshot):
+            return snapshot
+        case .binding(let snapshot):
+            return snapshot
+        case .saving(let snapshot):
+            return snapshot
+        case .submitting(let snapshot):
+            return snapshot
+        case .succeeded(_, let snapshot):
+            return snapshot
+        case .failed(_, let snapshot):
+            return snapshot
+        default:
+            return nil
+        }
+    }
+
+    private var appStoreReviewStatusText: String? {
+        switch viewModel.appStoreReviewState {
+        case .idle:
+            return nil
+        case .loading, .preparing, .binding, .saving, .submitting:
+            return strings.working
+        case .loaded:
+            return nil
+        case .succeeded(let message, _):
+            return message
+        case .failed(let message, _):
+            return message
+        }
+    }
+
+    private var appStoreReviewStatusColor: Color {
+        switch viewModel.appStoreReviewState {
+        case .failed:
+            return .red
+        case .succeeded:
+            return .green
+        case .loading, .preparing, .binding, .saving, .submitting:
+            return .yellow
+        default:
+            return .secondary
+        }
+    }
+
+    private var appStoreBuildSelectionBinding: Binding<String?> {
+        Binding(
+            get: { appStoreReviewSnapshot?.selectedBuildID },
+            set: { viewModel.selectAppStoreReviewBuild($0) }
+        )
+    }
+
+    private var canBindSelectedAppStoreBuild: Bool {
+        guard let snapshot = appStoreReviewSnapshot, let selectedBuildID = snapshot.selectedBuildID else {
+            return false
+        }
+        return !viewModel.isOperationRunning && snapshot.boundBuildID != selectedBuildID
+    }
+
+    private var canSubmitAppStoreReview: Bool {
+        guard let snapshot = appStoreReviewSnapshot, let selectedBuildID = snapshot.selectedBuildID else {
+            return false
+        }
+        return !viewModel.isOperationRunning && snapshot.boundBuildID == selectedBuildID
+    }
+
+    @ViewBuilder
+    private func appStoreReviewOperationLabel(title: String, systemImage: String) -> some View {
+        if isAppStoreReviewOperationRunning {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(title)
+            }
+        } else {
+            Label(title, systemImage: systemImage)
+        }
+    }
+
+    private var isAppStoreReviewOperationRunning: Bool {
+        switch viewModel.appStoreReviewState {
+        case .loading, .preparing, .binding, .saving, .submitting:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func placeholderRow(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
@@ -711,6 +1085,513 @@ struct ProjectDetailView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.callout)
+        }
+    }
+
+    private func saveAppStoreReviewAdvancedDraft(_ draft: AppStoreReviewAdvancedDraft) async -> String? {
+        await viewModel.saveAppStoreReviewAdvancedDraft(draft)
+        if case let .failed(message, _) = viewModel.appStoreReviewState {
+            return message
+        }
+        return nil
+    }
+}
+
+private struct AppStoreAdvancedLocalizationDraft: Equatable {
+    var description: String = ""
+    var keywords: String = ""
+    var marketingURL: String = ""
+    var promotionalText: String = ""
+    var supportURL: String = ""
+    var whatsNew: String = ""
+
+    init() {}
+
+    init(localization: ASCAppStoreVersionLocalization) {
+        description = localization.description ?? ""
+        keywords = localization.keywords ?? ""
+        marketingURL = localization.marketingURL ?? ""
+        promotionalText = localization.promotionalText ?? ""
+        supportURL = localization.supportURL ?? ""
+        whatsNew = localization.whatsNew ?? ""
+    }
+
+    var update: ASCAppStoreVersionLocalizationUpdate {
+        ASCAppStoreVersionLocalizationUpdate(
+            description: nilIfEmpty(description),
+            keywords: nilIfEmpty(keywords),
+            marketingURL: nilIfEmpty(marketingURL),
+            promotionalText: nilIfEmpty(promotionalText),
+            supportURL: nilIfEmpty(supportURL),
+            whatsNew: nilIfEmpty(whatsNew)
+        )
+    }
+}
+
+private struct AppStoreReviewDetailDraft: Equatable {
+    var contactFirstName: String = ""
+    var contactLastName: String = ""
+    var contactPhone: String = ""
+    var contactEmail: String = ""
+    var demoAccountName: String = ""
+    var demoAccountPassword: String = ""
+    var demoAccountRequired: Bool = false
+    var notes: String = ""
+
+    init() {}
+
+    init(detail: ASCAppStoreReviewDetail?) {
+        contactFirstName = detail?.contactFirstName ?? ""
+        contactLastName = detail?.contactLastName ?? ""
+        contactPhone = detail?.contactPhone ?? ""
+        contactEmail = detail?.contactEmail ?? ""
+        demoAccountName = detail?.demoAccountName ?? ""
+        demoAccountPassword = detail?.demoAccountPassword ?? ""
+        demoAccountRequired = detail?.demoAccountRequired ?? false
+        notes = detail?.notes ?? ""
+    }
+
+    var update: ASCAppStoreReviewDetailUpdate {
+        ASCAppStoreReviewDetailUpdate(
+            contactFirstName: nilIfEmpty(contactFirstName),
+            contactLastName: nilIfEmpty(contactLastName),
+            contactPhone: nilIfEmpty(contactPhone),
+            contactEmail: nilIfEmpty(contactEmail),
+            demoAccountName: nilIfEmpty(demoAccountName),
+            demoAccountPassword: nilIfEmpty(demoAccountPassword),
+            demoAccountRequired: demoAccountRequired,
+            notes: nilIfEmpty(notes)
+        )
+    }
+}
+
+private func nilIfEmpty(_ value: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : value
+}
+
+private struct AppStoreAdvancedFieldsSheet: View {
+    var snapshot: AppStoreReviewSnapshot
+    var strings: AppStrings
+    var onSave: (AppStoreReviewAdvancedDraft) async -> String?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedLocalizationID: String?
+    @State private var localizationDrafts: [String: AppStoreAdvancedLocalizationDraft]
+    @State private var reviewDraft: AppStoreReviewDetailDraft
+    @State private var showReviewPassword = false
+    @State private var isSaving = false
+    @State private var saveErrorMessage: String?
+
+    init(
+        snapshot: AppStoreReviewSnapshot,
+        strings: AppStrings,
+        onSave: @escaping (AppStoreReviewAdvancedDraft) async -> String?
+    ) {
+        self.snapshot = snapshot
+        self.strings = strings
+        self.onSave = onSave
+        _selectedLocalizationID = State(initialValue: snapshot.localizations.first?.id)
+        _localizationDrafts = State(initialValue: Dictionary(
+            uniqueKeysWithValues: snapshot.localizations.map { localization in
+                (localization.id, AppStoreAdvancedLocalizationDraft(localization: localization))
+            }
+        ))
+        _reviewDraft = State(initialValue: AppStoreReviewDetailDraft(detail: snapshot.reviewDetail))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Label(strings.advancedStoreFields, systemImage: "slider.horizontal.3")
+                    .font(.headline)
+                Text(snapshot.versionString)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                Spacer()
+                Button(strings.cancel) {
+                    dismiss()
+                }
+                .disabled(isSaving)
+
+                Button {
+                    Task {
+                        await save()
+                    }
+                } label: {
+                    if isSaving {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(strings.save)
+                        }
+                    } else {
+                        Label(strings.save, systemImage: "square.and.arrow.down")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSaving)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+
+            Divider()
+
+            if let saveErrorMessage {
+                Text(saveErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                Divider()
+            }
+
+            if snapshot.localizations.isEmpty {
+                VStack {
+                    Spacer()
+                    Text("-")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
+                HStack(spacing: 0) {
+                    localizationList
+                    Divider()
+                    advancedContent
+                }
+                .disabled(isSaving)
+            }
+        }
+        .frame(minWidth: 760, minHeight: 540)
+    }
+
+    private var localizationList: some View {
+        List(selection: $selectedLocalizationID) {
+            ForEach(snapshot.localizations, id: \.id) { localization in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(localization.locale)
+                        .font(.callout.weight(.semibold))
+                    Text(draft(for: localization.id).whatsNew.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? strings.needsUpdate : strings.filled)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(draft(for: localization.id).whatsNew.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .orange : .green)
+                }
+                .tag(Optional(localization.id))
+                .padding(.vertical, 3)
+            }
+        }
+        .listStyle(.sidebar)
+        .frame(width: 170)
+    }
+
+    private var advancedContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let localization = selectedLocalization {
+                    HStack {
+                        Text(localization.locale)
+                            .font(.title3.weight(.semibold))
+                        Spacer()
+                        Text(localization.id)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    editBlock(
+                        strings.whatsNew,
+                        text: draftBinding(for: localization.id, \.whatsNew),
+                        minHeight: 80
+                    )
+
+                    editBlock(
+                        strings.appStoreDescription,
+                        text: draftBinding(for: localization.id, \.description),
+                        minHeight: 120
+                    )
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                        editLine(strings.appStoreKeywords, text: draftBinding(for: localization.id, \.keywords))
+                        editLine(strings.appStorePromotionalText, text: draftBinding(for: localization.id, \.promotionalText))
+                        editLine(strings.appStoreSupportURL, text: draftBinding(for: localization.id, \.supportURL))
+                        editLine(strings.appStoreMarketingURL, text: draftBinding(for: localization.id, \.marketingURL))
+                    }
+
+                    screenshotSection(for: localization.id)
+                    reviewInfoSection
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var reviewInfoSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.appStoreReviewInfo)
+                .font(.callout.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(strings.requiresLogin, isOn: $reviewDraft.demoAccountRequired)
+                    .toggleStyle(.checkbox)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                    editLine(strings.account, text: $reviewDraft.demoAccountName)
+                    passwordLine
+                }
+            }
+            .padding(12)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+
+            Text(strings.contactInfo)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                editLine(strings.firstName, text: $reviewDraft.contactFirstName)
+                editLine(strings.lastName, text: $reviewDraft.contactLastName)
+                editLine(strings.phone, text: $reviewDraft.contactPhone)
+                editLine(strings.email, text: $reviewDraft.contactEmail)
+            }
+
+            editBlock(strings.reviewNotes, text: $reviewDraft.notes, minHeight: 88)
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var passwordLine: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(strings.password)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if showReviewPassword {
+                    TextField(strings.password, text: $reviewDraft.demoAccountPassword)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    SecureField(strings.password, text: $reviewDraft.demoAccountPassword)
+                        .textFieldStyle(.roundedBorder)
+                }
+                Button {
+                    showReviewPassword.toggle()
+                } label: {
+                    Image(systemName: showReviewPassword ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+                .help(showReviewPassword ? strings.hidePassword : strings.showPassword)
+            }
+        }
+    }
+
+    private var selectedLocalization: ASCAppStoreVersionLocalization? {
+        if let selectedLocalizationID,
+           let localization = snapshot.localizations.first(where: { $0.id == selectedLocalizationID }) {
+            return localization
+        }
+        return snapshot.localizations.first
+    }
+
+    private func draft(for localizationID: String) -> AppStoreAdvancedLocalizationDraft {
+        localizationDrafts[localizationID] ?? AppStoreAdvancedLocalizationDraft()
+    }
+
+    private func draftBinding(
+        for localizationID: String,
+        _ keyPath: WritableKeyPath<AppStoreAdvancedLocalizationDraft, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                draft(for: localizationID)[keyPath: keyPath]
+            },
+            set: { newValue in
+                var draft = localizationDrafts[localizationID] ?? AppStoreAdvancedLocalizationDraft()
+                draft[keyPath: keyPath] = newValue
+                localizationDrafts[localizationID] = draft
+            }
+        )
+    }
+
+    private func editBlock(_ title: String, text: Binding<String>, minHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: text)
+                .font(.body)
+                .frame(minHeight: minHeight)
+                .padding(6)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.35))
+                )
+        }
+    }
+
+    private func editLine(_ title: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(title, text: text)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    private func screenshotSection(for localizationID: String) -> some View {
+        let sets = snapshot.screenshotSets.filter { $0.localizationID == localizationID }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(strings.existingScreenshots)
+                    .font(.callout.weight(.semibold))
+                Spacer()
+            }
+
+            if sets.isEmpty {
+                Text(strings.noScreenshots)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(8)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(sets) { set in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(readableScreenshotDisplayType(set.screenshotDisplayType))
+                                    .font(.caption.weight(.semibold))
+                                Spacer()
+                                Text("\(set.screenshots.count)")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 10)], alignment: .leading, spacing: 10) {
+                                ForEach(set.screenshots, id: \.id) { screenshot in
+                                    screenshotItem(screenshot)
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func screenshotItem(_ screenshot: ASCAppScreenshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            screenshotThumbnail(screenshot)
+                .frame(width: 108, height: 142)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            Text(screenshot.fileName ?? screenshot.id)
+                .font(.caption2)
+                .lineLimit(1)
+            if let width = screenshot.width, let height = screenshot.height {
+                Text("\(width)x\(height)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 118, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func screenshotThumbnail(_ screenshot: ASCAppScreenshot) -> some View {
+        if let url = screenshotThumbnailURL(screenshot) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                case .failure:
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                case .empty:
+                    ProgressView()
+                        .controlSize(.small)
+                @unknown default:
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Image(systemName: "photo")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func screenshotThumbnailURL(_ screenshot: ASCAppScreenshot) -> URL? {
+        guard var template = screenshot.imageURLTemplate else { return nil }
+        template = template
+            .replacingOccurrences(of: "{w}", with: "180")
+            .replacingOccurrences(of: "{h}", with: "390")
+            .replacingOccurrences(of: "{f}", with: "png")
+        return URL(string: template)
+    }
+
+    private func readableScreenshotDisplayType(_ type: String) -> String {
+        switch type {
+        case "APP_IPHONE_67":
+            return "iPhone 6.7"
+        case "APP_IPHONE_65":
+            return "iPhone 6.5"
+        case "APP_IPHONE_61":
+            return "iPhone 6.1"
+        case "APP_IPHONE_58":
+            return "iPhone 5.8"
+        case "APP_IPHONE_55":
+            return "iPhone 5.5"
+        case "APP_IPAD_PRO_3GEN_129":
+            return "iPad Pro 12.9"
+        case "APP_IPAD_PRO_3GEN_11":
+            return "iPad Pro 11"
+        case "APP_IPAD_PRO_129":
+            return "iPad Pro 12.9"
+        case "APP_WATCH_ULTRA":
+            return "Apple Watch Ultra"
+        case "APP_WATCH_SERIES_10":
+            return "Apple Watch Series 10"
+        case "APP_WATCH_SERIES_7":
+            return "Apple Watch Series 7"
+        default:
+            return type
+                .replacingOccurrences(of: "APP_", with: "")
+                .replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private func makeAdvancedDraft() -> AppStoreReviewAdvancedDraft {
+        AppStoreReviewAdvancedDraft(
+            reviewDetailID: snapshot.reviewDetail?.id,
+            reviewDetailUpdate: snapshot.reviewDetail == nil ? nil : reviewDraft.update,
+            localizationUpdates: snapshot.localizations.map { localization in
+                AppStoreReviewLocalizationUpdate(
+                    localizationID: localization.id,
+                    update: draft(for: localization.id).update
+                )
+            }
+        )
+    }
+
+    private func save() async {
+        saveErrorMessage = nil
+        isSaving = true
+        let errorMessage = await onSave(makeAdvancedDraft())
+        isSaving = false
+        if let errorMessage {
+            saveErrorMessage = errorMessage
+        } else {
+            dismiss()
         }
     }
 }

@@ -165,6 +165,32 @@ private final class FakeASCClient: AppStoreConnectClientProtocol {
     func submitBetaReview(buildID: String) async throws -> ASCBetaReviewSubmission {
         ASCBetaReviewSubmission(id: "submission-\(buildID)", betaReviewState: "IN_REVIEW")
     }
+
+    func fetchAppStoreVersions(appID: String) async throws -> [ASCAppStoreVersion] { [] }
+    func createAppStoreVersion(appID: String, versionString: String, releaseType: String?) async throws -> ASCAppStoreVersion {
+        ASCAppStoreVersion(id: "version-\(versionString)", versionString: versionString, state: "PREPARE_FOR_SUBMISSION", releaseType: releaseType)
+    }
+    func fetchAppStoreVersionBuildID(appStoreVersionID: String) async throws -> String? { nil }
+    func updateAppStoreVersionBuild(appStoreVersionID: String, buildID: String) async throws {}
+    func fetchAppStoreReviewDetail(appStoreVersionID: String) async throws -> ASCAppStoreReviewDetail? { nil }
+    func fetchAppStoreVersionLocalizations(appStoreVersionID: String) async throws -> [ASCAppStoreVersionLocalization] { [] }
+    func updateAppStoreVersionLocalization(localizationID: String, update: ASCAppStoreVersionLocalizationUpdate) async throws -> ASCAppStoreVersionLocalization {
+        ASCAppStoreVersionLocalization(id: localizationID, locale: "en-US", description: update.description, keywords: update.keywords, marketingURL: update.marketingURL, promotionalText: update.promotionalText, supportURL: update.supportURL, whatsNew: update.whatsNew)
+    }
+    func updateAppStoreReviewDetail(reviewDetailID: String, update: ASCAppStoreReviewDetailUpdate) async throws -> ASCAppStoreReviewDetail {
+        ASCAppStoreReviewDetail(id: reviewDetailID, contactFirstName: update.contactFirstName, contactLastName: update.contactLastName, contactPhone: update.contactPhone, contactEmail: update.contactEmail, demoAccountName: update.demoAccountName, demoAccountPassword: update.demoAccountPassword, demoAccountRequired: update.demoAccountRequired, notes: update.notes)
+    }
+    func fetchAppScreenshotSets(appStoreVersionLocalizationID: String) async throws -> [ASCAppScreenshotSet] { [] }
+    func fetchAppScreenshots(appScreenshotSetID: String) async throws -> [ASCAppScreenshot] { [] }
+    func createReviewSubmission(appID: String) async throws -> ASCReviewSubmission {
+        ASCReviewSubmission(id: "review-\(appID)", state: "READY_FOR_REVIEW")
+    }
+    func createReviewSubmissionItem(reviewSubmissionID: String, appStoreVersionID: String) async throws -> ASCReviewSubmissionItem {
+        ASCReviewSubmissionItem(id: "item-\(appStoreVersionID)", state: "READY_FOR_REVIEW")
+    }
+    func submitReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
+        ASCReviewSubmission(id: reviewSubmissionID, state: "WAITING_FOR_REVIEW")
+    }
 }
 
 private final class FakeCommandRunner: CommandRunning {

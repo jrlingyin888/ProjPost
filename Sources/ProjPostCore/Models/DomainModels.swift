@@ -318,3 +318,120 @@ public enum TestFlightDistributionState: Equatable {
     case linking(TestFlightDistributionSnapshot?)
     case failed(message: String)
 }
+
+public struct AppStoreReviewBuildOption: Equatable, Identifiable {
+    public var id: String
+    public var buildNumber: String
+    public var processingState: String?
+    public var isBound: Bool
+
+    public init(id: String, buildNumber: String, processingState: String?, isBound: Bool) {
+        self.id = id
+        self.buildNumber = buildNumber
+        self.processingState = processingState
+        self.isBound = isBound
+    }
+}
+
+public struct AppStoreReviewScreenshotSet: Equatable, Identifiable {
+    public var id: String
+    public var localizationID: String
+    public var locale: String
+    public var screenshotDisplayType: String
+    public var screenshots: [ASCAppScreenshot]
+
+    public init(
+        id: String,
+        localizationID: String,
+        locale: String,
+        screenshotDisplayType: String,
+        screenshots: [ASCAppScreenshot]
+    ) {
+        self.id = id
+        self.localizationID = localizationID
+        self.locale = locale
+        self.screenshotDisplayType = screenshotDisplayType
+        self.screenshots = screenshots
+    }
+}
+
+public struct AppStoreReviewLocalizationUpdate: Equatable {
+    public var localizationID: String
+    public var update: ASCAppStoreVersionLocalizationUpdate
+
+    public init(localizationID: String, update: ASCAppStoreVersionLocalizationUpdate) {
+        self.localizationID = localizationID
+        self.update = update
+    }
+}
+
+public struct AppStoreReviewAdvancedDraft: Equatable {
+    public var reviewDetailID: String?
+    public var reviewDetailUpdate: ASCAppStoreReviewDetailUpdate?
+    public var localizationUpdates: [AppStoreReviewLocalizationUpdate]
+
+    public init(
+        reviewDetailID: String?,
+        reviewDetailUpdate: ASCAppStoreReviewDetailUpdate?,
+        localizationUpdates: [AppStoreReviewLocalizationUpdate]
+    ) {
+        self.reviewDetailID = reviewDetailID
+        self.reviewDetailUpdate = reviewDetailUpdate
+        self.localizationUpdates = localizationUpdates
+    }
+}
+
+public struct AppStoreReviewSnapshot: Equatable {
+    public var appID: String
+    public var appStoreVersionID: String
+    public var versionString: String
+    public var versionState: String?
+    public var releaseType: String?
+    public var selectedBuildID: String?
+    public var boundBuildID: String?
+    public var builds: [AppStoreReviewBuildOption]
+    public var reviewDetail: ASCAppStoreReviewDetail?
+    public var localizations: [ASCAppStoreVersionLocalization]
+    public var screenshotSets: [AppStoreReviewScreenshotSet]
+    public var reviewSubmissionState: String?
+
+    public init(
+        appID: String,
+        appStoreVersionID: String,
+        versionString: String,
+        versionState: String?,
+        releaseType: String?,
+        selectedBuildID: String?,
+        boundBuildID: String?,
+        builds: [AppStoreReviewBuildOption],
+        reviewDetail: ASCAppStoreReviewDetail?,
+        localizations: [ASCAppStoreVersionLocalization],
+        screenshotSets: [AppStoreReviewScreenshotSet] = [],
+        reviewSubmissionState: String?
+    ) {
+        self.appID = appID
+        self.appStoreVersionID = appStoreVersionID
+        self.versionString = versionString
+        self.versionState = versionState
+        self.releaseType = releaseType
+        self.selectedBuildID = selectedBuildID
+        self.boundBuildID = boundBuildID
+        self.builds = builds
+        self.reviewDetail = reviewDetail
+        self.localizations = localizations
+        self.screenshotSets = screenshotSets
+        self.reviewSubmissionState = reviewSubmissionState
+    }
+}
+
+public enum AppStoreReviewState: Equatable {
+    case idle
+    case loading
+    case preparing(AppStoreReviewSnapshot?)
+    case binding(AppStoreReviewSnapshot?)
+    case saving(AppStoreReviewSnapshot?)
+    case submitting(AppStoreReviewSnapshot?)
+    case loaded(AppStoreReviewSnapshot)
+    case succeeded(message: String, snapshot: AppStoreReviewSnapshot?)
+    case failed(message: String, snapshot: AppStoreReviewSnapshot?)
+}

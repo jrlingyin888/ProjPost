@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="980" viewBox="0 0 1280 980">
+  <style>
+    .bg { fill: #f7f7f7; }
+    .sidebar { fill: #f3f4f4; }
+    .content { fill: #ffffff; }
+    .card { fill: #f3f3f3; }
+    .card2 { fill: #f8f8f8; stroke: #e2e2e2; stroke-width: 1; }
+    .selected { fill: #d9eaff; stroke: #6aa8ff; stroke-width: 1; }
+    .muted-card { fill: #ededed; }
+    .primary { fill: #1782ff; }
+    .soft-blue { fill: #e8f2ff; }
+    .soft-green { fill: #e8f7ee; }
+    .soft-yellow { fill: #fff7df; }
+    .soft-red { fill: #ffeceb; }
+    .line { stroke: #d8d8d8; stroke-width: 1; }
+    .text { fill: #1f2328; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .title { fill: #111317; font: 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 700; }
+    .section { fill: #111317; font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 600; }
+    .small { fill: #6b7078; font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .caption { fill: #6b7078; font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .mono { fill: #1f2328; font: 12px "SF Mono", ui-monospace, Menlo, monospace; }
+    .white { fill: #ffffff; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 600; }
+    .buttonText { fill: #1f2328; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 600; }
+    .green { fill: #21b957; }
+    .orange { fill: #c99100; }
+    .red { fill: #d93025; }
+    .blue { fill: #0878ff; }
+    .tagText { font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 600; }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="1280" height="980" rx="18"/>
+  <rect class="sidebar" x="0" y="0" width="350" height="980" rx="18"/>
+  <rect class="content" x="350" y="0" width="930" height="980" rx="18"/>
+  <line class="line" x1="350" y1="0" x2="350" y2="980"/>
+
+  <circle cx="20" cy="18" r="7" fill="#ff5f57"/>
+  <circle cx="44" cy="18" r="7" fill="#febc2e"/>
+  <circle cx="68" cy="18" r="7" fill="#28c840"/>
+  <rect x="318" y="16" width="18" height="15" rx="3" fill="#eef0f0" stroke="#2f363d"/>
+  <line x1="325" y1="17" x2="325" y2="30" stroke="#2f363d"/>
+
+  <text class="title" x="22" y="80">项目</text>
+  <text class="small" x="22" y="99">选择工作台，或添加新的上传目标。</text>
+  <circle cx="312" cy="73" r="6" fill="#ffffff" stroke="#89909a"/>
+  <text class="small" x="308" y="77">••</text>
+  <path d="M322 71 L328 77 L334 71" fill="none" stroke="#30363d" stroke-width="1.4" stroke-linecap="round"/>
+
+  <rect class="selected" x="22" y="118" width="312" height="104" rx="7"/>
+  <text class="section" x="36" y="144">闪臣代理</text>
+  <text class="caption" x="36" y="164">/Users/jerrypop/Documents/Company/iOS/</text>
+  <text class="caption" x="36" y="180">scdl_ios_new</text>
+  <text class="text" x="36" y="201">#</text>
+  <text class="caption" x="58" y="201">v1.2.6 (1)</text>
+  <rect x="244" y="187" width="75" height="22" rx="11" fill="#dedede"/>
+  <text class="small" x="257" y="202">最近上传失败</text>
+  <circle cx="313" cy="138" r="7" fill="#1782ff"/>
+  <path d="M309.5 138 L312 140.5 L317 135" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+
+  <rect class="muted-card" x="22" y="234" width="312" height="106" rx="7" stroke="#dedede"/>
+  <text class="section" x="36" y="261">JGZ</text>
+  <text class="caption" x="36" y="281">/Users/jerrypop/Documents/Company/iOS/newnewjgz/</text>
+  <text class="caption" x="36" y="297">PTZL</text>
+  <text class="text" x="36" y="318">#</text>
+  <text class="caption" x="58" y="318">v1.1.0 (1)</text>
+  <rect x="274" y="306" width="46" height="20" rx="10" fill="#dedede"/>
+  <text class="small" x="286" y="320">未配置</text>
+  <circle cx="313" cy="256" r="7" fill="none" stroke="#9ba1a8"/>
+
+  <rect class="muted-card" x="22" y="846" width="312" height="112" rx="8"/>
+  <text class="section" x="37" y="876">⊞  添加项目</text>
+  <rect x="36" y="894" width="100" height="26" rx="7" fill="#e2e2e2"/>
+  <text class="buttonText" x="48" y="912">简体中文⌄</text>
+  <rect class="primary" x="36" y="930" width="115" height="26" rx="6"/>
+  <text class="white" x="52" y="948">选择文件夹</text>
+
+  <text class="title" x="371" y="28">JJPost v1.1.0</text>
+  <rect class="card" x="371" y="47" width="878" height="34" rx="8"/>
+  <rect class="primary" x="375" y="51" width="99" height="26" rx="6"/>
+  <text class="white" x="388" y="69">▣  扫描项目</text>
+  <text class="caption" x="504" y="68" opacity=".35">Release</text>
+
+  <text class="section" x="380" y="109">▣  Apple 账号</text>
+  <text class="caption" x="456" y="109">?  指引</text>
+  <rect class="card" x="371" y="114" width="878" height="138" rx="12"/>
+  <text class="section" x="376" y="136">已保存账号</text>
+  <rect x="454" y="120" width="95" height="23" rx="7" fill="#e0e0e0"/>
+  <text class="buttonText" x="468" y="136">闪臣代理⌄</text>
+  <text class="green" x="376" y="168">●</text>
+  <text class="green tagText" x="395" y="168">当前账号</text>
+  <text class="section" x="1190" y="168">闪臣代理</text>
+  <text class="caption" x="376" y="191">Key ID</text>
+  <text class="mono" x="376" y="208">9TV4...UN2Z</text>
+  <text class="caption" x="615" y="191">Issuer ID</text>
+  <text class="mono" x="615" y="208">604a...8166</text>
+  <text class="caption" x="854" y="191">Team ID</text>
+  <text class="mono" x="854" y="208">KR42...4ZCX</text>
+  <rect x="376" y="224" width="95" height="24" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="388" y="241">↙  编辑账号</text>
+  <rect x="484" y="224" width="111" height="24" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="501" y="241">▤  导入元数据</text>
+  <rect x="608" y="224" width="102" height="24" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="624" y="241">⌁  导入 .p8</text>
+  <text class="green tagText" x="1170" y="240">●  密钥已保存</text>
+
+  <text class="section" x="380" y="278">✈  TestFlight 上传</text>
+  <rect class="card" x="371" y="286" width="878" height="285" rx="12"/>
+  <rect class="primary" x="376" y="291" width="151" height="26" rx="6"/>
+  <text class="white" x="389" y="309">☁  上传到 TestFlight</text>
+  <rect x="536" y="291" width="119" height="26" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="550" y="309">↻  刷新 TF 状态</text>
+  <rect x="663" y="291" width="135" height="26" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="680" y="309">◉  提交 Beta 审核</text>
+  <text class="small" x="376" y="339">点击上传后会自动执行配置检查。</text>
+  <text class="orange tagText" x="376" y="363">TestFlight 状态：正在等待审核</text>
+  <line class="line" x1="376" y1="380" x2="1244" y2="380"/>
+  <text class="caption" x="376" y="402">当前构建版本</text>
+  <text class="section" x="376" y="420">1.2.6 (1) · 正在等待审核</text>
+  <text class="caption" x="376" y="445">内部测试</text>
+  <text class="green" x="376" y="471">●</text>
+  <text class="section" x="396" y="470">test01</text>
+  <text class="caption" x="1224" y="470">内部</text>
+  <text class="caption" x="376" y="497">外部测试</text>
+  <text class="green" x="376" y="526">●</text>
+  <text class="section" x="396" y="526">内测</text>
+  <text class="green tagText" x="1194" y="526">已开启链接</text>
+  <rect x="376" y="535" width="98" height="25" rx="6" fill="#e3e3e3"/>
+  <text class="caption" x="389" y="552">🔗  关联构建</text>
+  <rect x="486" y="540" width="17" height="17" rx="5" fill="#dddddd"/>
+  <text class="caption" x="507" y="553">审核通过后自动关联</text>
+
+  <text class="section" x="380" y="599">⌁  App Store 提审</text>
+  <rect class="card" x="371" y="608" width="878" height="342" rx="12"/>
+  <rect x="376" y="614" width="116" height="26" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="391" y="632">↻  刷新商店状态</text>
+  <rect x="501" y="614" width="136" height="26" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="514" y="632">▣  准备商店版本</text>
+  <rect x="646" y="614" width="126" height="26" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="660" y="632">🔗  绑定当前构建</text>
+  <rect class="primary" x="1088" y="614" width="151" height="26" rx="6"/>
+  <text class="white" x="1108" y="632">提交商店审核</text>
+
+  <rect class="card2" x="376" y="653" width="868" height="76" rx="8"/>
+  <text class="caption" x="390" y="675">商店版本</text>
+  <text class="section" x="390" y="696">1.2.6 · Prepare for Submission</text>
+  <rect class="soft-green" x="589" y="681" width="78" height="23" rx="11"/>
+  <text class="green tagText" x="604" y="697">构建已绑定</text>
+  <text class="caption" x="708" y="675">Build</text>
+  <text class="section" x="708" y="696">1.2.6 (1)</text>
+  <text class="caption" x="850" y="675">发布策略</text>
+  <rect x="850" y="682" width="196" height="26" rx="7" fill="#e0e0e0"/>
+  <rect class="content" x="854" y="685" width="62" height="20" rx="5"/>
+  <text class="small" x="870" y="699">手动</text>
+  <text class="small" x="927" y="699">通过后自动</text>
+  <text class="small" x="1000" y="699">定时</text>
+
+  <rect class="card2" x="376" y="740" width="868" height="76" rx="8"/>
+  <text class="section" x="390" y="763">审核信息</text>
+  <text class="caption" x="390" y="787">联系人：Jerry Pop · jerry@example.com · +82 10-0000-0000</text>
+  <text class="caption" x="390" y="805">Demo 账号：需要 · notes 已填写</text>
+  <rect x="1138" y="759" width="92" height="28" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="1156" y="778">编辑审核信息</text>
+
+  <rect class="card2" x="376" y="827" width="868" height="108" rx="8"/>
+  <text class="section" x="390" y="850">商店语言</text>
+  <text class="caption" x="465" y="850">App Store 对外多语言，不影响 App 内语言</text>
+  <rect class="soft-blue" x="390" y="866" width="135" height="31" rx="7"/>
+  <text class="buttonText" x="404" y="886">简体中文</text>
+  <rect class="soft-yellow" x="466" y="873" width="51" height="18" rx="9"/>
+  <text class="orange tagText" x="476" y="886">需更新</text>
+  <rect x="534" y="866" width="126" height="31" rx="7" fill="#efefef"/>
+  <text class="buttonText" x="548" y="886">English (U.S.)</text>
+  <rect class="soft-green" x="661" y="873" width="42" height="18" rx="9"/>
+  <text class="green tagText" x="671" y="886">已填</text>
+  <rect x="713" y="866" width="88" height="31" rx="7" fill="#efefef"/>
+  <text class="buttonText" x="730" y="886">日本語</text>
+  <rect class="soft-green" x="798" y="873" width="42" height="18" rx="9"/>
+  <text class="green tagText" x="808" y="886">已填</text>
+  <rect x="1140" y="864" width="87" height="28" rx="6" fill="#dedede"/>
+  <text class="buttonText" x="1157" y="883">管理语言</text>
+  <text class="caption" x="390" y="916">版本更新说明</text>
+  <rect x="490" y="904" width="560" height="22" rx="5" fill="#ffffff" stroke="#d5d5d5"/>
+  <text class="caption" x="500" y="920">修复已知问题，优化登录和订单体验。</text>
+  <text class="blue tagText" x="1072" y="920">高级：描述 / 关键词 / 截图</text>
+</svg>

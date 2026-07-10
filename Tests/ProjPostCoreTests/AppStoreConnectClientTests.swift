@@ -124,4 +124,208 @@ final class AppStoreConnectClientTests: XCTestCase {
             #"{"data":{"relationships":{"build":{"data":{"id":"build-123","type":"builds"}}},"type":"betaAppReviewSubmissions"}}"#
         )
     }
+
+    func testFetchAppStoreVersionsMapsVersionStateAndReleaseType() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":[{"id":"version-123","type":"appStoreVersions","attributes":{"versionString":"1.2.6","appStoreState":"PREPARE_FOR_SUBMISSION","releaseType":"MANUAL"}}]}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let versions = try await client.fetchAppStoreVersions(appID: "app-123")
+
+        XCTAssertEqual(versions, [
+            ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")
+        ])
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/v1/apps/app-123/appStoreVersions")
+    }
+
+    func testUpdateAppStoreVersionBuildPatchesSelectedBuildRelationship() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 204, body: "")
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        try await client.updateAppStoreVersionBuild(appStoreVersionID: "version-123", buildID: "build-456")
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "PATCH")
+        XCTAssertEqual(request.path, "/v1/appStoreVersions/version-123/relationships/build")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"id":"build-456","type":"builds"}}"#
+        )
+    }
+
+    func testFetchAppStoreVersionLocalizationsMapsWhatsNew() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":[{"id":"loc-zh","type":"appStoreVersionLocalizations","attributes":{"locale":"zh-Hans","whatsNew":"修复问题","description":"介绍","keywords":"工具","promotionalText":"推荐"}}]}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let localizations = try await client.fetchAppStoreVersionLocalizations(appStoreVersionID: "version-123")
+
+        XCTAssertEqual(localizations, [
+            ASCAppStoreVersionLocalization(
+                id: "loc-zh",
+                locale: "zh-Hans",
+                description: "介绍",
+                keywords: "工具",
+                marketingURL: nil,
+                promotionalText: "推荐",
+                supportURL: nil,
+                whatsNew: "修复问题"
+            )
+        ])
+        XCTAssertEqual(transport.requests.first?.path, "/v1/appStoreVersions/version-123/appStoreVersionLocalizations")
+    }
+
+    func testUpdateAppStoreVersionLocalizationPatchesEditableMetadata() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":{"id":"loc-zh","type":"appStoreVersionLocalizations","attributes":{"locale":"zh-Hans","whatsNew":"更新内容","description":"描述","keywords":"关键词","promotionalText":"宣传","supportUrl":"https://example.com/support","marketingUrl":"https://example.com"}}}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let localization = try await client.updateAppStoreVersionLocalization(
+            localizationID: "loc-zh",
+            update: ASCAppStoreVersionLocalizationUpdate(
+                description: "描述",
+                keywords: "关键词",
+                marketingURL: "https://example.com",
+                promotionalText: "宣传",
+                supportURL: "https://example.com/support",
+                whatsNew: "更新内容"
+            )
+        )
+
+        XCTAssertEqual(localization.whatsNew, "更新内容")
+        XCTAssertEqual(localization.supportURL, "https://example.com/support")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "PATCH")
+        XCTAssertEqual(request.path, "/v1/appStoreVersionLocalizations/loc-zh")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"attributes":{"description":"描述","keywords":"关键词","marketingUrl":"https:\/\/example.com","promotionalText":"宣传","supportUrl":"https:\/\/example.com\/support","whatsNew":"更新内容"},"id":"loc-zh","type":"appStoreVersionLocalizations"}}"#
+        )
+    }
+
+    func testUpdateAppStoreReviewDetailPatchesContactAndDemoLogin() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":{"id":"review-detail-1","type":"appStoreReviewDetails","attributes":{"contactFirstName":"ye","contactLastName":"zhina","contactPhone":"+861777","contactEmail":"mdc@example.com","demoAccountRequired":true,"demoAccountName":"13662388632","demoAccountPassword":"123456","notes":"备注"}}}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let detail = try await client.updateAppStoreReviewDetail(
+            reviewDetailID: "review-detail-1",
+            update: ASCAppStoreReviewDetailUpdate(
+                contactFirstName: "ye",
+                contactLastName: "zhina",
+                contactPhone: "+861777",
+                contactEmail: "mdc@example.com",
+                demoAccountName: "13662388632",
+                demoAccountPassword: "123456",
+                demoAccountRequired: true,
+                notes: "备注"
+            )
+        )
+
+        XCTAssertEqual(detail.demoAccountName, "13662388632")
+        XCTAssertEqual(detail.demoAccountPassword, "123456")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "PATCH")
+        XCTAssertEqual(request.path, "/v1/appStoreReviewDetails/review-detail-1")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"attributes":{"contactEmail":"mdc@example.com","contactFirstName":"ye","contactLastName":"zhina","contactPhone":"+861777","demoAccountName":"13662388632","demoAccountPassword":"123456","demoAccountRequired":true,"notes":"备注"},"id":"review-detail-1","type":"appStoreReviewDetails"}}"#
+        )
+    }
+
+    func testFetchAppScreenshotSetsMapsDisplayType() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":[{"id":"set-iphone-65","type":"appScreenshotSets","attributes":{"screenshotDisplayType":"APP_IPHONE_65"}},{"id":"set-ipad","type":"appScreenshotSets","attributes":{"screenshotDisplayType":"APP_IPAD_PRO_129"}}]}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let sets = try await client.fetchAppScreenshotSets(appStoreVersionLocalizationID: "loc-zh")
+
+        XCTAssertEqual(sets, [
+            ASCAppScreenshotSet(id: "set-iphone-65", screenshotDisplayType: "APP_IPHONE_65"),
+            ASCAppScreenshotSet(id: "set-ipad", screenshotDisplayType: "APP_IPAD_PRO_129")
+        ])
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/v1/appStoreVersionLocalizations/loc-zh/appScreenshotSets")
+        XCTAssertEqual(request.queryItems["limit"], "200")
+    }
+
+    func testFetchAppScreenshotsMapsFileAndImageAsset() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(
+                statusCode: 200,
+                body: #"{"data":[{"id":"shot-1","type":"appScreenshots","attributes":{"fileName":"screen1.png","fileSize":12345,"imageAsset":{"templateUrl":"https://is1-ssl.mzstatic.com/image/thumb/{w}x{h}.png","width":1242,"height":2688},"assetDeliveryState":{"state":"COMPLETE"}}},{"id":"shot-2","type":"appScreenshots","attributes":{"fileName":"screen2.png","fileSize":67890,"imageAsset":{"templateUrl":"https://is1-ssl.mzstatic.com/image/thumb/{w}x{h}bb.png","width":1242,"height":2688},"assetDeliveryState":{"state":"COMPLETE"}}}]}"#
+            )
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let screenshots = try await client.fetchAppScreenshots(appScreenshotSetID: "set-iphone-65")
+
+        XCTAssertEqual(screenshots, [
+            ASCAppScreenshot(
+                id: "shot-1",
+                fileName: "screen1.png",
+                fileSize: 12345,
+                imageURLTemplate: "https://is1-ssl.mzstatic.com/image/thumb/{w}x{h}.png",
+                width: 1242,
+                height: 2688,
+                assetDeliveryState: "COMPLETE"
+            ),
+            ASCAppScreenshot(
+                id: "shot-2",
+                fileName: "screen2.png",
+                fileSize: 67890,
+                imageURLTemplate: "https://is1-ssl.mzstatic.com/image/thumb/{w}x{h}bb.png",
+                width: 1242,
+                height: 2688,
+                assetDeliveryState: "COMPLETE"
+            )
+        ])
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/v1/appScreenshotSets/set-iphone-65/appScreenshots")
+        XCTAssertEqual(request.queryItems["limit"], "200")
+    }
+
+    func testSubmitReviewSubmissionMarksSubmissionSubmitted() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 200, body: #"{"data":{"id":"review-123","type":"reviewSubmissions","attributes":{"state":"WAITING_FOR_REVIEW"}}}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let submission = try await client.submitReviewSubmission(reviewSubmissionID: "review-123")
+
+        XCTAssertEqual(submission, ASCReviewSubmission(id: "review-123", state: "WAITING_FOR_REVIEW"))
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "PATCH")
+        XCTAssertEqual(request.path, "/v1/reviewSubmissions/review-123")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"attributes":{"submitted":true},"id":"review-123","type":"reviewSubmissions"}}"#
+        )
+    }
 }

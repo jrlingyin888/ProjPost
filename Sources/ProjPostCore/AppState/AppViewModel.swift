@@ -59,6 +59,15 @@ private enum TestFlightDistributionError: Error, Equatable {
     case buildNotFound(version: String, buildNumber: String)
 }
 
+private enum AppStoreReviewError: Error, Equatable {
+    case missingProjectFields
+    case appNotFound(String)
+    case versionNotFound(String)
+    case buildNotSelected
+    case versionNotLoaded
+    case selectedBuildNotBound
+}
+
 public struct AppleAccountDraft: Equatable {
     public var id: UUID?
     public var displayName: String
@@ -115,6 +124,7 @@ public final class AppViewModel: ObservableObject {
     @Published public var uploadEvents: [UploadEvent]
     @Published public var betaReviewState: BetaReviewSubmissionState
     @Published public var testFlightDistributionState: TestFlightDistributionState
+    @Published public var appStoreReviewState: AppStoreReviewState
     @Published public var updateState: AppUpdateState
     @Published public var language: AppLanguage
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
@@ -174,6 +184,7 @@ public final class AppViewModel: ObservableObject {
         self.uploadEvents = []
         self.betaReviewState = .idle
         self.testFlightDistributionState = .idle
+        self.appStoreReviewState = .idle
         self.updateState = .idle
         self.language = language
         self.privateKeyStatus = .missing
@@ -263,6 +274,21 @@ public final class AppViewModel: ObservableObject {
         if case .linking = testFlightDistributionState {
             return true
         }
+        if case .loading = appStoreReviewState {
+            return true
+        }
+        if case .preparing = appStoreReviewState {
+            return true
+        }
+        if case .binding = appStoreReviewState {
+            return true
+        }
+        if case .saving = appStoreReviewState {
+            return true
+        }
+        if case .submitting = appStoreReviewState {
+            return true
+        }
         return false
     }
 
@@ -321,6 +347,12 @@ public final class AppViewModel: ObservableObject {
             project.buildNumber ?? "",
             account.id.uuidString
         ].joined(separator: "|")
+    }
+
+    public var canQueryAppStoreReviewStatus: Bool {
+        guard let project = selectedProject, accountProfile != nil else { return false }
+        return project.bundleID?.isEmpty == false &&
+            project.version?.isEmpty == false
     }
 
     public func loadProjects() throws {
@@ -821,6 +853,139 @@ public final class AppViewModel: ObservableObject {
         await linkExternalGroupsForLatestBuild(targetGroupID: groupID)
     }
 
+    public func refreshAppStoreReviewStatus() async {
+        guard !isOperationRunning else { return }
+        appStoreReviewState = .loading
+        do {
+            let loaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
+            appStoreReviewState = .loaded(loaded.snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(error), snapshot: currentAppStoreReviewSnapshot)
+        }
+    }
+
+    public func prepareAppStoreReviewVersion() async {
+        guard !isOperationRunning else { return }
+        appStoreReviewState = .preparing(currentAppStoreReviewSnapshot)
+        do {
+            let loaded = try await loadAppStoreReviewSnapshot(createIfMissing: true)
+            appStoreReviewState = .loaded(loaded.snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(error), snapshot: currentAppStoreReviewSnapshot)
+        }
+    }
+
+    public func selectAppStoreReviewBuild(_ buildID: String?) {
+        guard !isOperationRunning else { return }
+        guard var snapshot = currentAppStoreReviewSnapshot else { return }
+        snapshot.selectedBuildID = buildID
+        appStoreReviewState = .loaded(snapshot)
+    }
+
+    public func bindSelectedAppStoreReviewBuild() async {
+        guard !isOperationRunning else { return }
+        guard var snapshot = currentAppStoreReviewSnapshot else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: nil)
+            return
+        }
+        guard let buildID = snapshot.selectedBuildID else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.buildNotSelected), snapshot: snapshot)
+            return
+        }
+        guard let account = accountProfile else {
+            appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
+            return
+        }
+
+        appStoreReviewState = .binding(snapshot)
+        do {
+            let client = appStoreConnectClient(for: account)
+            try await client.updateAppStoreVersionBuild(appStoreVersionID: snapshot.appStoreVersionID, buildID: buildID)
+            snapshot.boundBuildID = buildID
+            snapshot.builds = snapshot.builds.map { build in
+                AppStoreReviewBuildOption(
+                    id: build.id,
+                    buildNumber: build.buildNumber,
+                    processingState: build.processingState,
+                    isBound: build.id == buildID
+                )
+            }
+            appStoreReviewState = .loaded(snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: strings.appStoreReviewBindBuildFailed(error), snapshot: snapshot)
+        }
+    }
+
+    public func saveAppStoreReviewAdvancedDraft(_ draft: AppStoreReviewAdvancedDraft) async {
+        guard !isOperationRunning else { return }
+        guard let snapshot = currentAppStoreReviewSnapshot else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: nil)
+            return
+        }
+        guard let account = accountProfile else {
+            appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
+            return
+        }
+
+        appStoreReviewState = .saving(snapshot)
+        do {
+            let client = appStoreConnectClient(for: account)
+            for localizationUpdate in draft.localizationUpdates {
+                _ = try await client.updateAppStoreVersionLocalization(
+                    localizationID: localizationUpdate.localizationID,
+                    update: localizationUpdate.update
+                )
+            }
+
+            if let reviewDetailID = draft.reviewDetailID, let reviewDetailUpdate = draft.reviewDetailUpdate {
+                _ = try await client.updateAppStoreReviewDetail(
+                    reviewDetailID: reviewDetailID,
+                    update: reviewDetailUpdate
+                )
+            }
+
+            let loaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
+            appStoreReviewState = .loaded(loaded.snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: strings.appStoreReviewSaveFailed(error), snapshot: snapshot)
+        }
+    }
+
+    public func submitSelectedAppStoreReview() async {
+        guard !isOperationRunning else { return }
+        guard var snapshot = currentAppStoreReviewSnapshot else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: nil)
+            return
+        }
+        guard let selectedBuildID = snapshot.selectedBuildID else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.buildNotSelected), snapshot: snapshot)
+            return
+        }
+        guard snapshot.boundBuildID == selectedBuildID else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.selectedBuildNotBound), snapshot: snapshot)
+            return
+        }
+        guard let account = accountProfile else {
+            appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
+            return
+        }
+
+        appStoreReviewState = .submitting(snapshot)
+        do {
+            let client = appStoreConnectClient(for: account)
+            let reviewSubmission = try await client.createReviewSubmission(appID: snapshot.appID)
+            _ = try await client.createReviewSubmissionItem(
+                reviewSubmissionID: reviewSubmission.id,
+                appStoreVersionID: snapshot.appStoreVersionID
+            )
+            let submitted = try await client.submitReviewSubmission(reviewSubmissionID: reviewSubmission.id)
+            snapshot.reviewSubmissionState = submitted.state
+            appStoreReviewState = .succeeded(message: strings.appStoreReviewSubmitted(state: submitted.state ?? strings.appStoreReviewStatusSubmitted), snapshot: snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: strings.appStoreReviewSubmitFailed(error), snapshot: snapshot)
+        }
+    }
+
     private func linkExternalGroupsForLatestBuild(targetGroupID: String?) async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {
@@ -942,6 +1107,7 @@ public final class AppViewModel: ObservableObject {
         uploadState = .idle
         betaReviewState = .idle
         testFlightDistributionState = .idle
+        appStoreReviewState = .idle
     }
 
     private func checkResultsConsoleMessage(_ results: [CheckResult]) -> String {
@@ -996,6 +1162,27 @@ public final class AppViewModel: ObservableObject {
         case .loaded(let snapshot):
             return snapshot
         case .linking(let snapshot):
+            return snapshot
+        default:
+            return nil
+        }
+    }
+
+    private var currentAppStoreReviewSnapshot: AppStoreReviewSnapshot? {
+        switch appStoreReviewState {
+        case .loaded(let snapshot):
+            return snapshot
+        case .preparing(let snapshot):
+            return snapshot
+        case .binding(let snapshot):
+            return snapshot
+        case .saving(let snapshot):
+            return snapshot
+        case .submitting(let snapshot):
+            return snapshot
+        case .succeeded(_, let snapshot):
+            return snapshot
+        case .failed(_, let snapshot):
             return snapshot
         default:
             return nil
@@ -1126,6 +1313,143 @@ public final class AppViewModel: ObservableObject {
             return strings.uploadedBuildNotFound(version: version, buildNumber: buildNumber)
         default:
             return strings.refreshTestFlightDistributionFailed(error)
+        }
+    }
+
+    private func loadAppStoreReviewSnapshot(
+        createIfMissing: Bool
+    ) async throws -> (snapshot: AppStoreReviewSnapshot, client: AppStoreConnectClientProtocol) {
+        guard let project = selectedProject,
+              let bundleID = project.bundleID, !bundleID.isEmpty,
+              let versionString = project.version, !versionString.isEmpty else {
+            throw AppStoreReviewError.missingProjectFields
+        }
+        guard let account = accountProfile else {
+            throw AppStoreReviewError.missingProjectFields
+        }
+
+        let client = appStoreConnectClient(for: account)
+        guard let app = try await client.fetchApp(bundleID: bundleID) else {
+            throw AppStoreReviewError.appNotFound(bundleID)
+        }
+
+        let versions = try await client.fetchAppStoreVersions(appID: app.id)
+        let version: ASCAppStoreVersion
+        if let existing = versions.first(where: { $0.versionString == versionString }) {
+            version = existing
+        } else if createIfMissing {
+            version = try await client.createAppStoreVersion(appID: app.id, versionString: versionString, releaseType: "MANUAL")
+        } else {
+            throw AppStoreReviewError.versionNotFound(versionString)
+        }
+
+        let boundBuildID = try await client.fetchAppStoreVersionBuildID(appStoreVersionID: version.id)
+        let builds = try await client.fetchBuilds(appID: app.id, appVersion: version.versionString, buildNumber: nil)
+        let selectedBuildID = preferredAppStoreReviewBuildID(
+            project: project,
+            versionString: version.versionString,
+            builds: builds,
+            boundBuildID: boundBuildID
+        )
+        let reviewDetail = try await client.fetchAppStoreReviewDetail(appStoreVersionID: version.id)
+        let localizations = try await client.fetchAppStoreVersionLocalizations(appStoreVersionID: version.id)
+            .sorted { $0.locale < $1.locale }
+        let screenshotSets = try await loadAppStoreReviewScreenshotSets(
+            localizations: localizations,
+            client: client
+        )
+
+        let snapshot = AppStoreReviewSnapshot(
+            appID: app.id,
+            appStoreVersionID: version.id,
+            versionString: version.versionString,
+            versionState: version.state,
+            releaseType: version.releaseType,
+            selectedBuildID: selectedBuildID,
+            boundBuildID: boundBuildID,
+            builds: builds.map { build in
+                AppStoreReviewBuildOption(
+                    id: build.id,
+                    buildNumber: build.version,
+                    processingState: build.processingState,
+                    isBound: build.id == boundBuildID
+                )
+            },
+            reviewDetail: reviewDetail,
+            localizations: localizations,
+            screenshotSets: screenshotSets,
+            reviewSubmissionState: nil
+        )
+        return (snapshot, client)
+    }
+
+    private func loadAppStoreReviewScreenshotSets(
+        localizations: [ASCAppStoreVersionLocalization],
+        client: AppStoreConnectClientProtocol
+    ) async throws -> [AppStoreReviewScreenshotSet] {
+        var allSets: [AppStoreReviewScreenshotSet] = []
+        for localization in localizations {
+            let sets = try await client.fetchAppScreenshotSets(appStoreVersionLocalizationID: localization.id)
+                .sorted { $0.screenshotDisplayType < $1.screenshotDisplayType }
+            for set in sets {
+                let screenshots = try await client.fetchAppScreenshots(appScreenshotSetID: set.id)
+                allSets.append(
+                    AppStoreReviewScreenshotSet(
+                        id: set.id,
+                        localizationID: localization.id,
+                        locale: localization.locale,
+                        screenshotDisplayType: set.screenshotDisplayType,
+                        screenshots: screenshots
+                    )
+                )
+            }
+        }
+        return allSets
+    }
+
+    private func preferredAppStoreReviewBuildID(
+        project: ProjectProfile,
+        versionString: String,
+        builds: [ASCBuild],
+        boundBuildID: String?
+    ) -> String? {
+        if let currentSnapshot = currentAppStoreReviewSnapshot,
+           let selectedBuildID = currentSnapshot.selectedBuildID,
+           builds.contains(where: { $0.id == selectedBuildID }) {
+            return selectedBuildID
+        }
+        if let lastUpload = project.lastUpload,
+           lastUpload.succeeded,
+           lastUpload.version == versionString,
+           let build = builds.first(where: { $0.version == lastUpload.buildNumber }) {
+            return build.id
+        }
+        if let buildNumber = project.buildNumber,
+           let build = builds.first(where: { $0.version == buildNumber }) {
+            return build.id
+        }
+        if let boundBuildID, builds.contains(where: { $0.id == boundBuildID }) {
+            return boundBuildID
+        }
+        return builds.first(where: { $0.processingState == "VALID" })?.id ?? builds.first?.id
+    }
+
+    private func appStoreReviewErrorMessage(_ error: Error) -> String {
+        switch error {
+        case AppStoreReviewError.missingProjectFields:
+            return strings.bundleVersionRequiredBeforeAppStoreReview
+        case let AppStoreReviewError.appNotFound(bundleID):
+            return strings.appStoreConnectAppNotFound(bundleID)
+        case let AppStoreReviewError.versionNotFound(version):
+            return strings.appStoreVersionNotFound(version)
+        case AppStoreReviewError.buildNotSelected:
+            return strings.selectBuildBeforeAppStoreReviewAction
+        case AppStoreReviewError.versionNotLoaded:
+            return strings.loadAppStoreVersionBeforeAction
+        case AppStoreReviewError.selectedBuildNotBound:
+            return strings.bindSelectedBuildBeforeSubmittingAppStoreReview
+        default:
+            return strings.refreshAppStoreReviewFailed(error)
         }
     }
 

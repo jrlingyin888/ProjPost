@@ -725,6 +725,30 @@ final class AppViewModelStateTests: XCTestCase {
         ])
     }
 
+    func testRefreshAppStoreReviewLoadsActiveSubmissionState() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "WAITING_FOR_REVIEW", releaseType: "MANUAL")],
+            activeReviewSubmission: ASCReviewSubmission(id: "rs-1", state: "WAITING_FOR_REVIEW")
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+
+        await viewModel.refreshAppStoreReviewStatus()
+
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else { return XCTFail("expected loaded") }
+        XCTAssertEqual(snapshot.reviewSubmissionID, "rs-1")
+        XCTAssertEqual(snapshot.reviewSubmissionState, "WAITING_FOR_REVIEW")
+        XCTAssertEqual(AppStoreReviewPhase.resolve(snapshot: snapshot), .inReview)
+        XCTAssertEqual(appStoreConnect.fetchedActiveReviewSubmissionAppIDs, ["app-123"])
+    }
+
     func testSaveAppStoreReviewAdvancedDraftUpdatesRemoteFieldsAndRefreshesSnapshot() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
@@ -871,6 +895,62 @@ final class AppViewModelStateTests: XCTestCase {
         }
         XCTAssertEqual(snapshot.selectedBuildID, "build-3")
         XCTAssertEqual(snapshot.boundBuildID, "build-3")
+    }
+
+    func testSubmitAutoBindsThenSubmitsAndReloads() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")],
+            boundAppStoreVersionBuildIDs: [:]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+        viewModel.selectAppStoreReviewBuild("build-1")
+
+        await viewModel.submitSelectedAppStoreReview()
+
+        XCTAssertEqual(appStoreConnect.updatedAppStoreVersionBuilds, [FakeAppStoreConnectClient.UpdatedAppStoreVersionBuild(appStoreVersionID: "version-123", buildID: "build-1")])
+        XCTAssertEqual(appStoreConnect.createdReviewSubmissionAppIDs, ["app-123"])
+        XCTAssertEqual(appStoreConnect.submittedReviewSubmissionIDs.count, 1)
+        // reloaded snapshot reflects the submitted state, no stale badge
+        if case let .succeeded(_, snapshot) = viewModel.appStoreReviewState {
+            XCTAssertEqual(snapshot?.reviewSubmissionState, "WAITING_FOR_REVIEW")
+        } else if case let .loaded(snapshot) = viewModel.appStoreReviewState {
+            XCTAssertEqual(snapshot.reviewSubmissionState, "WAITING_FOR_REVIEW")
+        } else {
+            XCTFail("expected succeeded/loaded after submit")
+        }
+    }
+
+    func testSubmitReusesDanglingReadySubmissionWithoutCreating() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")],
+            boundAppStoreVersionBuildIDs: ["version-123": "build-1"],
+            activeReviewSubmission: ASCReviewSubmission(id: "rs-ready", state: "READY_FOR_REVIEW")
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+        viewModel.selectAppStoreReviewBuild("build-1")
+
+        await viewModel.submitSelectedAppStoreReview()
+
+        XCTAssertEqual(appStoreConnect.createdReviewSubmissionAppIDs, [], "should reuse the dangling READY_FOR_REVIEW submission")
+        XCTAssertEqual(appStoreConnect.submittedReviewSubmissionIDs, ["rs-ready"])
     }
 
     func testAutomaticChecksRunOnceWhenReady() async {

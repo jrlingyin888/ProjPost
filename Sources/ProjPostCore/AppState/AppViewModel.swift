@@ -961,10 +961,6 @@ public final class AppViewModel: ObservableObject {
             appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.buildNotSelected), snapshot: snapshot)
             return
         }
-        guard snapshot.boundBuildID == selectedBuildID else {
-            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.selectedBuildNotBound), snapshot: snapshot)
-            return
-        }
         guard let account = accountProfile else {
             appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
             return
@@ -973,14 +969,27 @@ public final class AppViewModel: ObservableObject {
         appStoreReviewState = .submitting(snapshot)
         do {
             let client = appStoreConnectClient(for: account)
-            let reviewSubmission = try await client.createReviewSubmission(appID: snapshot.appID)
-            _ = try await client.createReviewSubmissionItem(
-                reviewSubmissionID: reviewSubmission.id,
-                appStoreVersionID: snapshot.appStoreVersionID
+
+            if snapshot.boundBuildID != selectedBuildID {
+                try await client.updateAppStoreVersionBuild(appStoreVersionID: snapshot.appStoreVersionID, buildID: selectedBuildID)
+                snapshot.boundBuildID = selectedBuildID
+            }
+
+            let submissionID: String
+            if let existing = try await client.fetchActiveReviewSubmission(appID: snapshot.appID), existing.state == "READY_FOR_REVIEW" {
+                submissionID = existing.id
+            } else {
+                let created = try await client.createReviewSubmission(appID: snapshot.appID)
+                submissionID = created.id
+                _ = try await client.createReviewSubmissionItem(reviewSubmissionID: submissionID, appStoreVersionID: snapshot.appStoreVersionID)
+            }
+
+            let submitted = try await client.submitReviewSubmission(reviewSubmissionID: submissionID)
+            let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
+            appStoreReviewState = .succeeded(
+                message: strings.appStoreReviewSubmitted(state: submitted.state ?? strings.appStoreReviewStatusSubmitted),
+                snapshot: reloaded.snapshot
             )
-            let submitted = try await client.submitReviewSubmission(reviewSubmissionID: reviewSubmission.id)
-            snapshot.reviewSubmissionState = submitted.state
-            appStoreReviewState = .succeeded(message: strings.appStoreReviewSubmitted(state: submitted.state ?? strings.appStoreReviewStatusSubmitted), snapshot: snapshot)
         } catch {
             appStoreReviewState = .failed(message: strings.appStoreReviewSubmitFailed(error), snapshot: snapshot)
         }
@@ -1358,6 +1367,7 @@ public final class AppViewModel: ObservableObject {
             localizations: localizations,
             client: client
         )
+        let activeSubmission = try await client.fetchActiveReviewSubmission(appID: app.id)
 
         let snapshot = AppStoreReviewSnapshot(
             appID: app.id,
@@ -1378,7 +1388,8 @@ public final class AppViewModel: ObservableObject {
             reviewDetail: reviewDetail,
             localizations: localizations,
             screenshotSets: screenshotSets,
-            reviewSubmissionState: nil
+            reviewSubmissionState: activeSubmission?.state,
+            reviewSubmissionID: activeSubmission?.id
         )
         return (snapshot, client)
     }

@@ -328,4 +328,73 @@ final class AppStoreConnectClientTests: XCTestCase {
             #"{"data":{"attributes":{"submitted":true},"id":"review-123","type":"reviewSubmissions"}}"#
         )
     }
+
+    func testFetchActiveReviewSubmissionReturnsNonCompleteSubmission() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 200, body: #"{"data":[{"id":"rs-done","type":"reviewSubmissions","attributes":{"state":"COMPLETE"}},{"id":"rs-active","type":"reviewSubmissions","attributes":{"state":"WAITING_FOR_REVIEW"}}]}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let submission = try await client.fetchActiveReviewSubmission(appID: "app-123")
+
+        XCTAssertEqual(submission, ASCReviewSubmission(id: "rs-active", state: "WAITING_FOR_REVIEW"))
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/v1/reviewSubmissions")
+        XCTAssertEqual(request.queryItems["filter[app]"], "app-123")
+        XCTAssertEqual(request.queryItems["filter[platform]"], "IOS")
+    }
+
+    func testCancelReviewSubmissionSendsCanceledTrue() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 200, body: #"{"data":{"id":"rs-active","type":"reviewSubmissions","attributes":{"state":"CANCELING"}}}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let submission = try await client.cancelReviewSubmission(reviewSubmissionID: "rs-active")
+
+        XCTAssertEqual(submission, ASCReviewSubmission(id: "rs-active", state: "CANCELING"))
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "PATCH")
+        XCTAssertEqual(request.path, "/v1/reviewSubmissions/rs-active")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"attributes":{"canceled":true},"id":"rs-active","type":"reviewSubmissions"}}"#
+        )
+    }
+
+    func testUpdateReleaseTypePatchesVersion() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 200, body: #"{"data":{"id":"version-123","type":"appStoreVersions","attributes":{"versionString":"1.2.6","appStoreState":"PREPARE_FOR_SUBMISSION","releaseType":"AFTER_APPROVAL"}}}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        let version = try await client.updateAppStoreVersionReleaseType(appStoreVersionID: "version-123", releaseType: "AFTER_APPROVAL")
+
+        XCTAssertEqual(version.releaseType, "AFTER_APPROVAL")
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "PATCH")
+        XCTAssertEqual(request.path, "/v1/appStoreVersions/version-123")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"attributes":{"releaseType":"AFTER_APPROVAL"},"id":"version-123","type":"appStoreVersions"}}"#
+        )
+    }
+
+    func testRequestReleasePostsReleaseRequest() async throws {
+        let transport = StubASCTransport(responses: [
+            ASCTransportResponse(statusCode: 201, body: #"{"data":{"id":"release-1","type":"appStoreVersionReleaseRequests"}}"#)
+        ])
+        let client = AppStoreConnectClient(jwtProvider: { "token" }, transport: transport)
+
+        try await client.requestAppStoreVersionRelease(appStoreVersionID: "version-123")
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/v1/appStoreVersionReleaseRequests")
+        XCTAssertEqual(
+            String(data: try XCTUnwrap(request.body), encoding: .utf8),
+            #"{"data":{"relationships":{"appStoreVersion":{"data":{"id":"version-123","type":"appStoreVersions"}}},"type":"appStoreVersionReleaseRequests"}}"#
+        )
+    }
 }

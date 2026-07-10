@@ -1690,6 +1690,7 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var appScreenshotsBySetID: [String: [ASCAppScreenshot]]
     var reviewSubmission: ASCReviewSubmission
     var reviewSubmissionItem: ASCReviewSubmissionItem
+    var activeReviewSubmission: ASCReviewSubmission?
     var addBuildFailuresByGroupID: [String: Error] = [:]
     var enablePublicLinkFailuresByGroupID: [String: Error] = [:]
     private(set) var fetchAppBundleIDs: [String] = []
@@ -1712,6 +1713,10 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     private(set) var createdReviewSubmissionAppIDs: [String] = []
     private(set) var createdReviewSubmissionItems: [(reviewSubmissionID: String, appStoreVersionID: String)] = []
     private(set) var submittedReviewSubmissionIDs: [String] = []
+    private(set) var fetchedActiveReviewSubmissionAppIDs: [String] = []
+    private(set) var canceledReviewSubmissionIDs: [String] = []
+    private(set) var updatedReleaseTypes: [(appStoreVersionID: String, releaseType: String)] = []
+    private(set) var releasedAppStoreVersionIDs: [String] = []
 
     init(
         app: ASCApp? = nil,
@@ -1728,7 +1733,8 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         appScreenshotSetsByLocalizationID: [String: [ASCAppScreenshotSet]] = [:],
         appScreenshotsBySetID: [String: [ASCAppScreenshot]] = [:],
         reviewSubmission: ASCReviewSubmission = ASCReviewSubmission(id: "review-submission", state: "READY_FOR_REVIEW"),
-        reviewSubmissionItem: ASCReviewSubmissionItem = ASCReviewSubmissionItem(id: "review-item", state: "READY_FOR_REVIEW")
+        reviewSubmissionItem: ASCReviewSubmissionItem = ASCReviewSubmissionItem(id: "review-item", state: "READY_FOR_REVIEW"),
+        activeReviewSubmission: ASCReviewSubmission? = nil
     ) {
         self.app = app
         self.bundle = bundle
@@ -1745,6 +1751,7 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
         self.appScreenshotsBySetID = appScreenshotsBySetID
         self.reviewSubmission = reviewSubmission
         self.reviewSubmissionItem = reviewSubmissionItem
+        self.activeReviewSubmission = activeReviewSubmission
     }
 
     func fetchApp(bundleID: String) async throws -> ASCApp? {
@@ -1887,6 +1894,7 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
 
     func createReviewSubmission(appID: String) async throws -> ASCReviewSubmission {
         createdReviewSubmissionAppIDs.append(appID)
+        activeReviewSubmission = reviewSubmission
         return reviewSubmission
     }
 
@@ -1897,7 +1905,35 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
 
     func submitReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
         submittedReviewSubmissionIDs.append(reviewSubmissionID)
-        return ASCReviewSubmission(id: reviewSubmissionID, state: "WAITING_FOR_REVIEW")
+        let submitted = ASCReviewSubmission(id: reviewSubmissionID, state: "WAITING_FOR_REVIEW")
+        activeReviewSubmission = submitted
+        return submitted
+    }
+
+    func fetchActiveReviewSubmission(appID: String) async throws -> ASCReviewSubmission? {
+        fetchedActiveReviewSubmissionAppIDs.append(appID)
+        return activeReviewSubmission
+    }
+
+    func cancelReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
+        canceledReviewSubmissionIDs.append(reviewSubmissionID)
+        activeReviewSubmission = nil
+        return ASCReviewSubmission(id: reviewSubmissionID, state: "CANCELING")
+    }
+
+    func updateAppStoreVersionReleaseType(appStoreVersionID: String, releaseType: String) async throws -> ASCAppStoreVersion {
+        updatedReleaseTypes.append((appStoreVersionID, releaseType))
+        if let index = appStoreVersions.firstIndex(where: { $0.id == appStoreVersionID }) {
+            let current = appStoreVersions[index]
+            let updated = ASCAppStoreVersion(id: current.id, versionString: current.versionString, state: current.state, releaseType: releaseType)
+            appStoreVersions[index] = updated
+            return updated
+        }
+        return ASCAppStoreVersion(id: appStoreVersionID, versionString: "", state: nil, releaseType: releaseType)
+    }
+
+    func requestAppStoreVersionRelease(appStoreVersionID: String) async throws {
+        releasedAppStoreVersionIDs.append(appStoreVersionID)
     }
 }
 

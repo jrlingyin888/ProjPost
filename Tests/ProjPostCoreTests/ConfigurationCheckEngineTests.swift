@@ -191,6 +191,10 @@ private final class FakeASCClient: AppStoreConnectClientProtocol {
     func submitReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
         ASCReviewSubmission(id: reviewSubmissionID, state: "WAITING_FOR_REVIEW")
     }
+    func fetchActiveReviewSubmission(appID: String) async throws -> ASCReviewSubmission? { nil }
+    func cancelReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission { ASCReviewSubmission(id: reviewSubmissionID, state: nil) }
+    func updateAppStoreVersionReleaseType(appStoreVersionID: String, releaseType: String) async throws -> ASCAppStoreVersion { ASCAppStoreVersion(id: appStoreVersionID, versionString: "", state: nil, releaseType: releaseType) }
+    func requestAppStoreVersionRelease(appStoreVersionID: String) async throws {}
 }
 
 private final class FakeCommandRunner: CommandRunning {

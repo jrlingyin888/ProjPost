@@ -292,6 +292,10 @@ public protocol AppStoreConnectClientProtocol {
     func createReviewSubmission(appID: String) async throws -> ASCReviewSubmission
     func createReviewSubmissionItem(reviewSubmissionID: String, appStoreVersionID: String) async throws -> ASCReviewSubmissionItem
     func submitReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission
+    func fetchActiveReviewSubmission(appID: String) async throws -> ASCReviewSubmission?
+    func cancelReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission
+    func updateAppStoreVersionReleaseType(appStoreVersionID: String, releaseType: String) async throws -> ASCAppStoreVersion
+    func requestAppStoreVersionRelease(appStoreVersionID: String) async throws
 }
 
 public struct ASCRequest: Equatable {
@@ -659,6 +663,59 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
             throw AppStoreConnectError.malformedResponse
         }
         return Self.mapReviewSubmission(data)
+    }
+
+    public func fetchActiveReviewSubmission(appID: String) async throws -> ASCReviewSubmission? {
+        let json = try await get(
+            path: "/v1/reviewSubmissions",
+            query: ["filter[app]": appID, "filter[platform]": "IOS"]
+        )
+        let submissions = try dataArray(from: json).map(Self.mapReviewSubmission)
+        return submissions.first { $0.state != "COMPLETE" }
+    }
+
+    public func cancelReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
+        let body: [String: Any] = [
+            "data": [
+                "type": "reviewSubmissions",
+                "id": reviewSubmissionID,
+                "attributes": ["canceled": true]
+            ]
+        ]
+        let json = try await send(method: "PATCH", path: "/v1/reviewSubmissions/\(reviewSubmissionID)", query: [:], jsonBody: body)
+        guard let data = json["data"] as? [String: Any] else {
+            throw AppStoreConnectError.malformedResponse
+        }
+        return Self.mapReviewSubmission(data)
+    }
+
+    public func updateAppStoreVersionReleaseType(appStoreVersionID: String, releaseType: String) async throws -> ASCAppStoreVersion {
+        let body: [String: Any] = [
+            "data": [
+                "type": "appStoreVersions",
+                "id": appStoreVersionID,
+                "attributes": ["releaseType": releaseType]
+            ]
+        ]
+        let json = try await send(method: "PATCH", path: "/v1/appStoreVersions/\(appStoreVersionID)", query: [:], jsonBody: body)
+        guard let data = json["data"] as? [String: Any] else {
+            throw AppStoreConnectError.malformedResponse
+        }
+        return Self.mapAppStoreVersion(data)
+    }
+
+    public func requestAppStoreVersionRelease(appStoreVersionID: String) async throws {
+        let body: [String: Any] = [
+            "data": [
+                "type": "appStoreVersionReleaseRequests",
+                "relationships": [
+                    "appStoreVersion": [
+                        "data": ["type": "appStoreVersions", "id": appStoreVersionID]
+                    ]
+                ]
+            ]
+        ]
+        try await sendNoContent(method: "POST", path: "/v1/appStoreVersionReleaseRequests", query: [:], jsonBody: body)
     }
 
     private func get(path: String, query: [String: String]) async throws -> [String: Any] {

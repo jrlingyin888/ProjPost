@@ -394,6 +394,7 @@ public struct AppStoreReviewSnapshot: Equatable {
     public var localizations: [ASCAppStoreVersionLocalization]
     public var screenshotSets: [AppStoreReviewScreenshotSet]
     public var reviewSubmissionState: String?
+    public var reviewSubmissionID: String?
 
     public init(
         appID: String,
@@ -407,7 +408,8 @@ public struct AppStoreReviewSnapshot: Equatable {
         reviewDetail: ASCAppStoreReviewDetail?,
         localizations: [ASCAppStoreVersionLocalization],
         screenshotSets: [AppStoreReviewScreenshotSet] = [],
-        reviewSubmissionState: String?
+        reviewSubmissionState: String?,
+        reviewSubmissionID: String? = nil
     ) {
         self.appID = appID
         self.appStoreVersionID = appStoreVersionID
@@ -421,6 +423,7 @@ public struct AppStoreReviewSnapshot: Equatable {
         self.localizations = localizations
         self.screenshotSets = screenshotSets
         self.reviewSubmissionState = reviewSubmissionState
+        self.reviewSubmissionID = reviewSubmissionID
     }
 }
 
@@ -434,4 +437,137 @@ public enum AppStoreReviewState: Equatable {
     case loaded(AppStoreReviewSnapshot)
     case succeeded(message: String, snapshot: AppStoreReviewSnapshot?)
     case failed(message: String, snapshot: AppStoreReviewSnapshot?)
+}
+
+public enum AppStoreReviewPhase: Equatable {
+    case noVersion
+    case editable
+    case inReview
+    case canceling
+    case pendingDeveloperRelease
+    case releasing
+    case live
+    case replaced
+
+    public init(versionState: String?, submissionState: String?) {
+        switch submissionState {
+        case "READY_FOR_REVIEW", "WAITING_FOR_REVIEW", "IN_REVIEW", "UNRESOLVED_ISSUES":
+            self = .inReview
+            return
+        case "CANCELING":
+            self = .canceling
+            return
+        default:
+            break
+        }
+        switch versionState {
+        case "WAITING_FOR_REVIEW", "IN_REVIEW":
+            self = .inReview
+        case "PENDING_DEVELOPER_RELEASE":
+            self = .pendingDeveloperRelease
+        case "PENDING_APPLE_RELEASE", "PROCESSING_FOR_APP_STORE", "PROCESSING_FOR_DISTRIBUTION":
+            self = .releasing
+        case "READY_FOR_SALE", "READY_FOR_DISTRIBUTION", "ACCEPTED":
+            self = .live
+        case "REPLACED_WITH_NEW_VERSION":
+            self = .replaced
+        default:
+            self = .editable
+        }
+    }
+
+    public static func resolve(snapshot: AppStoreReviewSnapshot?) -> AppStoreReviewPhase {
+        guard let snapshot else { return .noVersion }
+        return AppStoreReviewPhase(versionState: snapshot.versionState, submissionState: snapshot.reviewSubmissionState)
+    }
+}
+
+public enum ReviewReadinessSeverity: Equatable {
+    case green
+    case yellow
+    case red
+}
+
+public enum ReviewReadinessKind: Equatable {
+    case buildValid
+    case whatsNewFilled
+    case reviewContactComplete
+    case screenshotsPresent
+    case exportCompliance
+}
+
+public struct ReviewReadinessItem: Equatable, Identifiable {
+    public var kind: ReviewReadinessKind
+    public var severity: ReviewReadinessSeverity
+    public var detail: String?
+
+    public init(kind: ReviewReadinessKind, severity: ReviewReadinessSeverity, detail: String? = nil) {
+        self.kind = kind
+        self.severity = severity
+        self.detail = detail
+    }
+
+    public var id: String { "\(kind)" }
+}
+
+public enum AppStoreReviewReadiness {
+    public static func evaluate(snapshot: AppStoreReviewSnapshot) -> [ReviewReadinessItem] {
+        [
+            buildItem(snapshot),
+            whatsNewItem(snapshot),
+            contactItem(snapshot),
+            screenshotItem(snapshot),
+            exportComplianceItem(snapshot)
+        ]
+    }
+
+    public static func blocks(_ items: [ReviewReadinessItem]) -> Bool {
+        items.contains { $0.severity == .red }
+    }
+
+    private static func buildItem(_ snapshot: AppStoreReviewSnapshot) -> ReviewReadinessItem {
+        guard let selectedBuildID = snapshot.selectedBuildID,
+              let build = snapshot.builds.first(where: { $0.id == selectedBuildID }) else {
+            return ReviewReadinessItem(kind: .buildValid, severity: .red)
+        }
+        let isValid = build.processingState == "VALID"
+        return ReviewReadinessItem(kind: .buildValid, severity: isValid ? .green : .red, detail: build.buildNumber)
+    }
+
+    private static func whatsNewItem(_ snapshot: AppStoreReviewSnapshot) -> ReviewReadinessItem {
+        let supportsWhatsNew = snapshot.localizations.contains { $0.whatsNew != nil }
+        guard supportsWhatsNew else {
+            return ReviewReadinessItem(kind: .whatsNewFilled, severity: .green)
+        }
+        func filled(_ loc: ASCAppStoreVersionLocalization) -> Bool {
+            (loc.whatsNew?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        }
+        let applicable = snapshot.localizations.filter { $0.whatsNew != nil }
+        let emptyLocales = applicable.filter { !filled($0) }.map(\.locale)
+        if emptyLocales.count == applicable.count {
+            return ReviewReadinessItem(kind: .whatsNewFilled, severity: .red)
+        } else if emptyLocales.isEmpty {
+            return ReviewReadinessItem(kind: .whatsNewFilled, severity: .green)
+        } else {
+            return ReviewReadinessItem(kind: .whatsNewFilled, severity: .yellow, detail: emptyLocales.joined(separator: ", "))
+        }
+    }
+
+    private static func contactItem(_ snapshot: AppStoreReviewSnapshot) -> ReviewReadinessItem {
+        func present(_ value: String?) -> Bool { value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }
+        let detail = snapshot.reviewDetail
+        let complete = present(detail?.contactFirstName) && present(detail?.contactLastName)
+            && present(detail?.contactPhone) && present(detail?.contactEmail)
+        return ReviewReadinessItem(kind: .reviewContactComplete, severity: complete ? .green : .red)
+    }
+
+    private static func screenshotItem(_ snapshot: AppStoreReviewSnapshot) -> ReviewReadinessItem {
+        let total = snapshot.screenshotSets.reduce(0) { $0 + $1.screenshots.count }
+        return ReviewReadinessItem(kind: .screenshotsPresent, severity: total > 0 ? .green : .yellow)
+    }
+
+    private static func exportComplianceItem(_ snapshot: AppStoreReviewSnapshot) -> ReviewReadinessItem {
+        let waiting = snapshot.versionState == "WAITING_FOR_EXPORT_COMPLIANCE"
+        return ReviewReadinessItem(kind: .exportCompliance, severity: waiting ? .red : .green)
+    }
 }

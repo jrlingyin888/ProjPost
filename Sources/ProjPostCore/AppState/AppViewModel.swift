@@ -1003,6 +1003,76 @@ public final class AppViewModel: ObservableObject {
         }
     }
 
+    public func cancelAppStoreReview() async {
+        guard !isOperationRunning else { return }
+        guard let snapshot = currentAppStoreReviewSnapshot else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: nil)
+            return
+        }
+        guard let submissionID = snapshot.reviewSubmissionID else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: snapshot)
+            return
+        }
+        guard let account = accountProfile else {
+            appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
+            return
+        }
+
+        appStoreReviewState = .submitting(snapshot)
+        do {
+            let client = appStoreConnectClient(for: account)
+            _ = try await client.cancelReviewSubmission(reviewSubmissionID: submissionID)
+            let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
+            appStoreReviewState = .loaded(reloaded.snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: strings.appStoreReviewCancelFailed(error), snapshot: snapshot)
+        }
+    }
+
+    public func updateAppStoreReviewReleaseType(_ releaseType: String) async {
+        guard !isOperationRunning else { return }
+        guard let snapshot = currentAppStoreReviewSnapshot else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: nil)
+            return
+        }
+        guard let account = accountProfile else {
+            appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
+            return
+        }
+
+        appStoreReviewState = .saving(snapshot)
+        do {
+            let client = appStoreConnectClient(for: account)
+            _ = try await client.updateAppStoreVersionReleaseType(appStoreVersionID: snapshot.appStoreVersionID, releaseType: releaseType)
+            let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
+            appStoreReviewState = .loaded(reloaded.snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: strings.appStoreReviewReleaseTypeFailed(error), snapshot: snapshot)
+        }
+    }
+
+    public func releaseApprovedVersion() async {
+        guard !isOperationRunning else { return }
+        guard let snapshot = currentAppStoreReviewSnapshot else {
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: nil)
+            return
+        }
+        guard let account = accountProfile else {
+            appStoreReviewState = .failed(message: strings.selectAppleAccountBeforeRefreshingTestFlightStatus, snapshot: snapshot)
+            return
+        }
+
+        appStoreReviewState = .submitting(snapshot)
+        do {
+            let client = appStoreConnectClient(for: account)
+            try await client.requestAppStoreVersionRelease(appStoreVersionID: snapshot.appStoreVersionID)
+            let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
+            appStoreReviewState = .loaded(reloaded.snapshot)
+        } catch {
+            appStoreReviewState = .failed(message: strings.appStoreReviewReleaseFailed(error), snapshot: snapshot)
+        }
+    }
+
     private func linkExternalGroupsForLatestBuild(targetGroupID: String?) async {
         guard !isOperationRunning else { return }
         guard let project = selectedProject else {

@@ -983,6 +983,71 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(snapshot.builds.first(where: { $0.id == "build-1" })?.isBound, true, "build.isBound must agree with boundBuildID on the failure snapshot")
     }
 
+    func testCancelAppStoreReviewCancelsAndReloads() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")],
+            activeReviewSubmission: ASCReviewSubmission(id: "rs-1", state: "WAITING_FOR_REVIEW")
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+
+        await viewModel.cancelAppStoreReview()
+
+        XCTAssertEqual(appStoreConnect.canceledReviewSubmissionIDs, ["rs-1"])
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else { return XCTFail("expected loaded") }
+        XCTAssertNil(snapshot.reviewSubmissionID) // active submission cleared after cancel
+    }
+
+    func testUpdateReleaseTypePatchesAndReloads() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+
+        await viewModel.updateAppStoreReviewReleaseType("AFTER_APPROVAL")
+
+        XCTAssertEqual(appStoreConnect.updatedReleaseTypes.map(\.releaseType), ["AFTER_APPROVAL"])
+        guard case let .loaded(snapshot) = viewModel.appStoreReviewState else { return XCTFail("expected loaded") }
+        XCTAssertEqual(snapshot.releaseType, "AFTER_APPROVAL")
+    }
+
+    func testReleaseApprovedVersionRequestsRelease() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PENDING_DEVELOPER_RELEASE", releaseType: "MANUAL")]
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+
+        await viewModel.releaseApprovedVersion()
+
+        XCTAssertEqual(appStoreConnect.releasedAppStoreVersionIDs, ["version-123"])
+    }
+
     func testAutomaticChecksRunOnceWhenReady() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,

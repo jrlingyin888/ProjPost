@@ -428,6 +428,18 @@ public struct AppStrings: Equatable {
         text("Submit App Store review failed: \(error)", "提交商店审核失败：\(error)")
     }
 
+    public func appStoreReviewCancelFailed(_ error: Error) -> String {
+        text("Failed to withdraw the review submission: \(error)", "撤销审核提交失败：\(error)")
+    }
+
+    public func appStoreReviewReleaseTypeFailed(_ error: Error) -> String {
+        text("Failed to update the release strategy: \(error)", "更新发布策略失败：\(error)")
+    }
+
+    public func appStoreReviewReleaseFailed(_ error: Error) -> String {
+        text("Failed to release to the App Store: \(error)", "发布到 App Store 失败：\(error)")
+    }
+
     public var selectProjectBeforeLinkingExternalGroups: String {
         text("Select a project before linking external groups.", "请先选择项目再关联外部测试组。")
     }

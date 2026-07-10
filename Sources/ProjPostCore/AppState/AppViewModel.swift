@@ -132,6 +132,7 @@ public final class AppViewModel: ObservableObject {
     @Published public private(set) var projectMutationSummary: [String]
     @Published public private(set) var activityLog: [ActivityEntry] = []
     @Published public var notice: ActivityNotice?
+    @Published public private(set) var isBackgroundLoadingTestFlight = false
 
     private let store: ProjectProfileStoreProtocol
     private let accountStore: AppleAccountProfileStoreProtocol
@@ -847,7 +848,23 @@ public final class AppViewModel: ObservableObject {
     public func refreshLatestBuildTestFlightStatusIfNeeded() async {
         guard latestBuildStatusTrigger != "not-ready" else { return }
         guard !isOperationRunning else { return }
-        await refreshLatestBuildTestFlightStatus()
+        guard !isBackgroundLoadingTestFlight else { return }
+        await loadTestFlightStatusInBackground()
+    }
+
+    private func loadTestFlightStatusInBackground() async {
+        guard let project = selectedProject, let account = accountProfile else { return }
+        isBackgroundLoadingTestFlight = true
+        defer { isBackgroundLoadingTestFlight = false }
+        do {
+            let loaded = try await loadLatestBuildDistribution(project: project, account: account)
+            testFlightDistributionState = .loaded(loaded.snapshot)
+            recordActivity(.info, strings.testFlightStatus(loaded.snapshot.betaReviewStateText))
+        } catch {
+            let message = testFlightDistributionErrorMessage(error)
+            testFlightDistributionState = .failed(message: message)
+            recordActivity(.error, message)
+        }
     }
 
     public func refreshLatestBuildTestFlightStatus() async {

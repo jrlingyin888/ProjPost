@@ -1918,6 +1918,32 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(viewModel.activityLog.last?.level, .error)
         XCTAssertTrue(viewModel.activityLog.last?.message.contains("Upload failed") == true)
     }
+
+    func testBackgroundAutoLoadDoesNotLockUIAndLogs() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-123", version: "1", processingState: "VALID", betaReviewState: "APPROVED")],
+            betaGroups: []
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+
+        await viewModel.refreshLatestBuildTestFlightStatusIfNeeded()
+
+        // Background load must NOT flip the global operation lock, and must not touch betaReviewState (the manual-refresh channel).
+        XCTAssertFalse(viewModel.isOperationRunning)
+        XCTAssertFalse(viewModel.isBackgroundLoadingTestFlight)
+        if case .loaded = viewModel.testFlightDistributionState {} else { XCTFail("expected loaded snapshot") }
+        if case .idle = viewModel.betaReviewState {} else { XCTFail("background load must not set betaReviewState") }
+        // It logged the read (info level → console, no success toast on entry).
+        XCTAssertEqual(viewModel.activityLog.last?.level, .info)
+        XCTAssertNil(viewModel.notice)
+    }
 }
 
 private func makeProject(

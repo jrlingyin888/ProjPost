@@ -573,3 +573,35 @@ public enum AppStoreReviewReadiness {
         return ReviewReadinessItem(kind: .exportCompliance, severity: waiting ? .red : .green)
     }
 }
+
+public enum ActivityLevel: Equatable {
+    case info
+    case success
+    case error
+}
+
+public struct ActivityEntry: Identifiable, Equatable {
+    public let id: UUID
+    public let timestamp: Date
+    public let level: ActivityLevel
+    public let message: String
+
+    public init(id: UUID = UUID(), timestamp: Date, level: ActivityLevel, message: String) {
+        self.id = id
+        self.timestamp = timestamp
+        self.level = level
+        self.message = message
+    }
+}
+
+public struct ActivityNotice: Identifiable, Equatable {
+    public let id: UUID
+    public let level: ActivityLevel
+    public let message: String
+
+    public init(id: UUID = UUID(), level: ActivityLevel, message: String) {
+        self.id = id
+        self.level = level
+        self.message = message
+    }
+}

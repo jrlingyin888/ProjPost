@@ -1846,6 +1846,47 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertTrue(vault.savedKeys.isEmpty)
         XCTAssertEqual(viewModel.privateKeyStatus, .missing)
     }
+
+    func testRecordActivityAppendsAndRaisesNoticeOnlyForSuccessError() {
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner()
+        )
+        viewModel.recordActivity(.info, "loading")
+        XCTAssertEqual(viewModel.activityLog.map(\.message), ["loading"])
+        XCTAssertNil(viewModel.notice)
+
+        viewModel.recordActivity(.error, "boom")
+        XCTAssertEqual(viewModel.activityLog.last?.level, .error)
+        XCTAssertEqual(viewModel.notice?.level, .error)
+        XCTAssertEqual(viewModel.notice?.message, "boom")
+
+        viewModel.recordActivity(.success, "done")
+        XCTAssertEqual(viewModel.notice?.level, .success)
+    }
+
+    func testActivityLogCapsAtTwoHundred() {
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner()
+        )
+        for i in 0..<205 { viewModel.recordActivity(.info, "m\(i)") }
+        XCTAssertEqual(viewModel.activityLog.count, 200)
+        XCTAssertEqual(viewModel.activityLog.first?.message, "m5")
+        XCTAssertEqual(viewModel.activityLog.last?.message, "m204")
+    }
+
+    func testClearLogAndDismissNotice() {
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner()
+        )
+        viewModel.recordActivity(.error, "x")
+        viewModel.clearActivityLog()
+        viewModel.dismissNotice()
+        XCTAssertTrue(viewModel.activityLog.isEmpty)
+        XCTAssertNil(viewModel.notice)
+    }
 }
 
 private func makeProject(

@@ -130,6 +130,8 @@ public final class AppViewModel: ObservableObject {
     @Published public var language: AppLanguage
     @Published public private(set) var privateKeyStatus: PrivateKeyStatus
     @Published public private(set) var projectMutationSummary: [String]
+    @Published public private(set) var activityLog: [ActivityEntry] = []
+    @Published public var notice: ActivityNotice?
 
     private let store: ProjectProfileStoreProtocol
     private let accountStore: AppleAccountProfileStoreProtocol
@@ -243,6 +245,24 @@ public final class AppViewModel: ObservableObject {
         if case .available = updateState {
             updateState = .idle
         }
+    }
+
+    func recordActivity(_ level: ActivityLevel, _ message: String) {
+        activityLog.append(ActivityEntry(timestamp: Date(), level: level, message: message))
+        if activityLog.count > 200 {
+            activityLog.removeFirst(activityLog.count - 200)
+        }
+        if level == .success || level == .error {
+            notice = ActivityNotice(level: level, message: message)
+        }
+    }
+
+    public func clearActivityLog() {
+        activityLog.removeAll()
+    }
+
+    public func dismissNotice() {
+        notice = nil
     }
 
     public var hasYellowChecks: Bool {

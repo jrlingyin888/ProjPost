@@ -54,6 +54,7 @@ struct ProjectDetailView: View {
             )
         }
         .overlay(alignment: .top) { noticeBanner }
+        .animation(.default, value: viewModel.notice?.id)
         .task(id: viewModel.latestBuildStatusTrigger) {
             await viewModel.refreshLatestBuildTestFlightStatusIfNeeded()
         }

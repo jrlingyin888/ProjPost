@@ -184,7 +184,11 @@ public struct AppStrings: Equatable {
         text("The first two actions update App Store Connect version data, but do not submit for review.", "前两步会更新 App Store Connect 版本资料，但不会提交审核。")
     }
     public var appStoreReviewStatusSubmitted: String { text("Submitted", "已提交") }
-    public var appStoreReviewStatusRefreshed: String { text("Store review info updated", "商店审核信息已更新") }
+    public var appStoreReviewWithdrawn: String { text("Withdrawn from review", "已撤销提审") }
+    public var appStoreReviewReleased: String { text("Released to the App Store", "已发布到 App Store") }
+    public var appStoreReviewReleaseTypeUpdated: String { text("Release strategy updated", "发布策略已更新") }
+    public var appStoreReviewBuildBound: String { text("Build bound", "已绑定构建") }
+    public var appStoreReviewInfoSaved: String { text("Review info saved", "审核信息已保存") }
     public var submitForReview: String { text("Submit for Review", "提交审核") }
     public var submittingForReview: String { text("Submitting…", "提交中…") }
     public var withdrawReview: String { text("Withdraw", "撤销提审") }
@@ -214,12 +218,9 @@ public struct AppStrings: Equatable {
         }
     }
 
-    public var uploadConsole: String { text("Upload Console", "上传控制台") }
-    public var noUploadEvents: String { text("No upload events yet.", "还没有上传事件。") }
     public var activityConsole: String { text("Activity Console", "活动控制台") }
     public var clearLog: String { text("Clear", "清空") }
     public var noActivityYet: String { text("No activity yet.", "暂无活动。") }
-    public var idle: String { text("Idle", "空闲") }
     public var cancelled: String { text("Cancelled", "已取消") }
     public var updatingTestFlightStatus: String { text("Updating TestFlight status...", "正在更新 TestFlight 状态...") }
 

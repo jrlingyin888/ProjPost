@@ -409,10 +409,9 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(snapshot.externalGroups.first?.publicLink, "https://testflight.apple.com/join/a")
     }
 
-    func testRefreshTestFlightStatusIsReadOnlyEvenWhenAutoLinkConfigured() async {
+    func testRefreshTestFlightStatusIsReadOnly() async {
         // Refreshing (and auto-load on entry) must only read/display status — never
-        // silently link external groups — even for an approved build whose groups were
-        // previously flagged for auto-link. Linking is an explicit user action.
+        // silently link external groups. Linking is an explicit user action.
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
             displayName: "Company",
@@ -976,6 +975,8 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(appStoreConnect.canceledReviewSubmissionIDs, ["rs-1"])
         guard case let .loaded(snapshot) = viewModel.appStoreReviewState else { return XCTFail("expected loaded") }
         XCTAssertNil(snapshot.reviewSubmissionID) // active submission cleared after cancel
+        XCTAssertEqual(viewModel.activityLog.last?.level, .success) // withdraw now logs a success toast
+        XCTAssertEqual(viewModel.notice?.level, .success)
     }
 
     func testCancelAppStoreReviewFailsWithDistinctMessageWhenNoActiveSubmission() async {

@@ -294,7 +294,6 @@ public final class AppViewModel: ObservableObject {
         switch state {
         case .succeeded(let message, _): recordActivity(.success, message)
         case .failed(let message, _): recordActivity(.error, message)
-        case .loaded: recordActivity(.info, strings.appStoreReviewStatusRefreshed)
         default: break
         }
     }
@@ -949,6 +948,7 @@ public final class AppViewModel: ObservableObject {
                 )
             }
             appStoreReviewState = .loaded(snapshot)
+            recordActivity(.success, strings.appStoreReviewBuildBound)
         } catch {
             appStoreReviewState = .failed(message: strings.appStoreReviewBindBuildFailed(error), snapshot: snapshot)
         }
@@ -984,6 +984,7 @@ public final class AppViewModel: ObservableObject {
 
             let loaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
             appStoreReviewState = .loaded(loaded.snapshot)
+            recordActivity(.success, strings.appStoreReviewInfoSaved)
         } catch {
             appStoreReviewState = .failed(message: strings.appStoreReviewSaveFailed(error), snapshot: snapshot)
         }
@@ -1064,6 +1065,7 @@ public final class AppViewModel: ObservableObject {
             _ = try await client.cancelReviewSubmission(reviewSubmissionID: submissionID)
             let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
             appStoreReviewState = .loaded(reloaded.snapshot)
+            recordActivity(.success, strings.appStoreReviewWithdrawn)
         } catch {
             appStoreReviewState = .failed(message: strings.appStoreReviewCancelFailed(error), snapshot: snapshot)
         }
@@ -1086,6 +1088,7 @@ public final class AppViewModel: ObservableObject {
             _ = try await client.updateAppStoreVersionReleaseType(appStoreVersionID: snapshot.appStoreVersionID, releaseType: releaseType)
             let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
             appStoreReviewState = .loaded(reloaded.snapshot)
+            recordActivity(.success, strings.appStoreReviewReleaseTypeUpdated)
         } catch {
             appStoreReviewState = .failed(message: strings.appStoreReviewReleaseTypeFailed(error), snapshot: snapshot)
         }
@@ -1108,6 +1111,7 @@ public final class AppViewModel: ObservableObject {
             try await client.requestAppStoreVersionRelease(appStoreVersionID: snapshot.appStoreVersionID)
             let reloaded = try await loadAppStoreReviewSnapshot(createIfMissing: false)
             appStoreReviewState = .loaded(reloaded.snapshot)
+            recordActivity(.success, strings.appStoreReviewReleased)
         } catch {
             appStoreReviewState = .failed(message: strings.appStoreReviewReleaseFailed(error), snapshot: snapshot)
         }

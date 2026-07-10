@@ -24,6 +24,8 @@ struct ProjectDetailView: View {
     @State private var isEditingSavedAccount = false
     @State private var showAppleAccountGuide = false
     @State private var showAdvancedStoreFields = false
+    @State private var showWithdrawConfirm = false
+    @State private var showReleaseConfirm = false
 
     private var strings: AppStrings {
         AppStrings(language: localizationStore.language)
@@ -328,70 +330,157 @@ struct ProjectDetailView: View {
     private var appStoreReviewActions: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
+                    reviewPhaseBadgeView
+                    Spacer()
                     Button {
-                        Task {
-                            await viewModel.refreshAppStoreReviewStatus()
-                        }
+                        Task { await viewModel.refreshAppStoreReviewStatus() }
                     } label: {
                         Label(strings.refreshStoreStatus, systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .disabled(!viewModel.canQueryAppStoreReviewStatus || viewModel.isOperationRunning)
-
-                    Button {
-                        Task {
-                            await viewModel.prepareAppStoreReviewVersion()
-                        }
-                    } label: {
-                        appStoreReviewOperationLabel(title: strings.prepareStoreVersion, systemImage: "square.stack.3d.up")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!viewModel.canQueryAppStoreReviewStatus || viewModel.isOperationRunning)
-
-                    Button {
-                        Task {
-                            await viewModel.bindSelectedAppStoreReviewBuild()
-                        }
-                    } label: {
-                        appStoreReviewOperationLabel(title: strings.bindSelectedBuild, systemImage: "link")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!canBindSelectedAppStoreBuild)
-
-                    Spacer()
-
-                    Button {
-                        Task {
-                            await viewModel.submitSelectedAppStoreReview()
-                        }
-                    } label: {
-                        appStoreReviewOperationLabel(title: strings.submitStoreReview, systemImage: "paperplane.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canSubmitAppStoreReview)
+                    appStoreReviewPrimaryButton
                 }
 
-                Text(strings.appStoreReviewSafeActionHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let snapshot = appStoreReviewSnapshot {
+                    appStoreReviewSnapshotView(snapshot)
+                    reviewReadinessView(snapshot)
+                } else {
+                    HStack {
+                        placeholderRow(title: strings.appStoreReview, value: strings.appStoreReviewNoVersionLoaded)
+                        Spacer()
+                        Button {
+                            Task { await viewModel.prepareAppStoreReviewVersion() }
+                        } label: {
+                            appStoreReviewOperationLabel(title: strings.createStoreVersionAction, systemImage: "square.stack.3d.up")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!viewModel.canQueryAppStoreReviewStatus || viewModel.isOperationRunning)
+                    }
+                }
 
                 if let appStoreReviewStatusText {
                     Text(appStoreReviewStatusText)
                         .font(.caption)
                         .foregroundStyle(appStoreReviewStatusColor)
                 }
-
-                Divider()
-
-                if let snapshot = appStoreReviewSnapshot {
-                    appStoreReviewSnapshotView(snapshot)
-                } else {
-                    placeholderRow(title: strings.appStoreReview, value: strings.appStoreReviewNoVersionLoaded)
-                }
             }
         } label: {
             Label(strings.appStoreReview, systemImage: "app.badge")
+        }
+    }
+
+    private var reviewPhase: AppStoreReviewPhase {
+        AppStoreReviewPhase.resolve(snapshot: appStoreReviewSnapshot)
+    }
+
+    private var reviewPhaseBadgeView: some View {
+        Text(strings.reviewPhaseBadge(reviewPhase))
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(reviewPhaseColor.opacity(0.15), in: Capsule())
+            .foregroundStyle(reviewPhaseColor)
+    }
+
+    private var reviewPhaseColor: Color {
+        switch reviewPhase {
+        case .noVersion, .replaced: return .secondary
+        case .editable: return .gray
+        case .inReview, .canceling, .releasing: return .orange
+        case .pendingDeveloperRelease: return .blue
+        case .live: return .green
+        }
+    }
+
+    @ViewBuilder
+    private var appStoreReviewPrimaryButton: some View {
+        switch reviewPhase {
+        case .editable:
+            Button {
+                Task { await viewModel.submitSelectedAppStoreReview() }
+            } label: {
+                appStoreReviewOperationLabel(title: isAppStoreReviewOperationRunning ? strings.submittingForReview : strings.submitForReview, systemImage: "paperplane.circle")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canSubmitAppStoreReview)
+        case .inReview:
+            Button(role: .destructive) {
+                showWithdrawConfirm = true
+            } label: {
+                appStoreReviewOperationLabel(title: isAppStoreReviewOperationRunning ? strings.withdrawingReview : strings.withdrawReview, systemImage: "arrow.uturn.backward.circle")
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.isOperationRunning)
+            .confirmationDialog(strings.withdrawReviewConfirm, isPresented: $showWithdrawConfirm) {
+                Button(strings.withdrawReview, role: .destructive) { Task { await viewModel.cancelAppStoreReview() } }
+                Button(strings.cancel, role: .cancel) {}
+            }
+        case .pendingDeveloperRelease:
+            Button {
+                showReleaseConfirm = true
+            } label: {
+                appStoreReviewOperationLabel(title: isAppStoreReviewOperationRunning ? strings.releasingToAppStore : strings.releaseToAppStore, systemImage: "checkmark.seal")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isOperationRunning)
+            .confirmationDialog(strings.releaseNowConfirm, isPresented: $showReleaseConfirm) {
+                Button(strings.releaseToAppStore) { Task { await viewModel.releaseApprovedVersion() } }
+                Button(strings.cancel, role: .cancel) {}
+            }
+        case .noVersion, .canceling, .releasing, .live, .replaced:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func reviewReadinessView(_ snapshot: AppStoreReviewSnapshot) -> some View {
+        let items = AppStoreReviewReadiness.evaluate(snapshot: snapshot)
+        if reviewPhase == .editable {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.submissionReadiness)
+                    .font(.callout.weight(.semibold))
+                ForEach(items) { item in
+                    HStack(spacing: 6) {
+                        Image(systemName: readinessSymbol(item.severity))
+                            .foregroundStyle(readinessColor(item.severity))
+                        Text(readinessTitle(item.kind))
+                            .font(.caption)
+                        if let detail = item.detail, !detail.isEmpty {
+                            Text(detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func readinessSymbol(_ severity: ReviewReadinessSeverity) -> String {
+        switch severity {
+        case .green: return "checkmark.circle.fill"
+        case .yellow: return "exclamationmark.triangle.fill"
+        case .red: return "xmark.circle.fill"
+        }
+    }
+
+    private func readinessColor(_ severity: ReviewReadinessSeverity) -> Color {
+        switch severity {
+        case .green: return .green
+        case .yellow: return .orange
+        case .red: return .red
+        }
+    }
+
+    private func readinessTitle(_ kind: ReviewReadinessKind) -> String {
+        switch kind {
+        case .buildValid: return strings.readinessBuildValid
+        case .whatsNewFilled: return strings.readinessWhatsNew
+        case .reviewContactComplete: return strings.readinessContact
+        case .screenshotsPresent: return strings.readinessScreenshots
+        case .exportCompliance: return strings.readinessExport
         }
     }
 
@@ -591,7 +680,16 @@ struct ProjectDetailView: View {
                     Text(strings.releaseStrategy)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    releaseStrategyBadge(snapshot.releaseType)
+                    Picker(strings.releaseStrategy, selection: releaseTypeBinding) {
+                        Text(strings.manualRelease).tag("MANUAL")
+                        Text(strings.afterApprovalRelease).tag("AFTER_APPROVAL")
+                        if snapshot.releaseType == "SCHEDULED" {
+                            Text(strings.scheduledRelease).tag("SCHEDULED")
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 180)
+                    .disabled(viewModel.isOperationRunning || reviewPhase != .editable)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -708,24 +806,6 @@ struct ProjectDetailView: View {
         }
         .padding(10)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func releaseStrategyBadge(_ releaseType: String?) -> some View {
-        let text: String
-        switch releaseType {
-        case "AFTER_APPROVAL":
-            text = strings.afterApprovalRelease
-        case "SCHEDULED":
-            text = strings.scheduledRelease
-        default:
-            text = strings.manualRelease
-        }
-
-        return Text(text)
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
     }
 
     private func appStoreBuildOptionText(_ build: AppStoreReviewBuildOption) -> String {
@@ -1042,18 +1122,17 @@ struct ProjectDetailView: View {
         )
     }
 
-    private var canBindSelectedAppStoreBuild: Bool {
-        guard let snapshot = appStoreReviewSnapshot, let selectedBuildID = snapshot.selectedBuildID else {
-            return false
-        }
-        return !viewModel.isOperationRunning && snapshot.boundBuildID != selectedBuildID
+    private var releaseTypeBinding: Binding<String> {
+        Binding(
+            get: { appStoreReviewSnapshot?.releaseType ?? "MANUAL" },
+            set: { newValue in Task { await viewModel.updateAppStoreReviewReleaseType(newValue) } }
+        )
     }
 
     private var canSubmitAppStoreReview: Bool {
-        guard let snapshot = appStoreReviewSnapshot, let selectedBuildID = snapshot.selectedBuildID else {
-            return false
-        }
-        return !viewModel.isOperationRunning && snapshot.boundBuildID == selectedBuildID
+        guard let snapshot = appStoreReviewSnapshot, snapshot.selectedBuildID != nil else { return false }
+        if viewModel.isOperationRunning { return false }
+        return !AppStoreReviewReadiness.blocks(AppStoreReviewReadiness.evaluate(snapshot: snapshot))
     }
 
     @ViewBuilder

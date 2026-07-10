@@ -183,6 +183,34 @@ public struct AppStrings: Equatable {
         text("The first two actions update App Store Connect version data, but do not submit for review.", "前两步会更新 App Store Connect 版本资料，但不会提交审核。")
     }
     public var appStoreReviewStatusSubmitted: String { text("Submitted", "已提交") }
+    public var submitForReview: String { text("Submit for Review", "提交审核") }
+    public var submittingForReview: String { text("Submitting…", "提交中…") }
+    public var withdrawReview: String { text("Withdraw", "撤销提审") }
+    public var withdrawingReview: String { text("Withdrawing…", "撤销中…") }
+    public var releaseToAppStore: String { text("Release to App Store", "发布到 App Store") }
+    public var releasingToAppStore: String { text("Releasing…", "发布中…") }
+    public var submissionReadiness: String { text("Submission readiness", "提交就绪") }
+    public var readinessBuildValid: String { text("Build selected and VALID", "构建已选择且 VALID") }
+    public var readinessWhatsNew: String { text("What's New filled", "更新说明已填") }
+    public var readinessContact: String { text("Review contact complete", "审核联系信息完整") }
+    public var readinessScreenshots: String { text("Screenshots present", "已有截图") }
+    public var readinessExport: String { text("Export compliance", "出口合规") }
+    public var readinessScreenshotsHint: String { text("Add screenshots in App Store Connect", "请在 App Store Connect 补充截图") }
+    public var withdrawReviewConfirm: String { text("Withdraw this version from review?", "确定撤销该版本的提审？") }
+    public var releaseNowConfirm: String { text("Release this version to the App Store now?", "现在把该版本发布到 App Store？") }
+    public var createStoreVersionAction: String { text("Create store version", "创建商店版本") }
+    public func reviewPhaseBadge(_ phase: AppStoreReviewPhase) -> String {
+        switch phase {
+        case .noVersion: return text("No version", "无版本")
+        case .editable: return text("Prepare for Submission", "待提交")
+        case .inReview: return text("In Review", "审核中")
+        case .canceling: return text("Canceling", "撤销中")
+        case .pendingDeveloperRelease: return text("Pending Release", "待发布")
+        case .releasing: return text("Releasing", "发布中")
+        case .live: return text("On the App Store", "已上架")
+        case .replaced: return text("Replaced", "已替换")
+        }
+    }
 
     public var uploadConsole: String { text("Upload Console", "上传控制台") }
     public var noUploadEvents: String { text("No upload events yet.", "还没有上传事件。") }

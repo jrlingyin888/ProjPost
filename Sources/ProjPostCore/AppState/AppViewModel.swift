@@ -973,6 +973,14 @@ public final class AppViewModel: ObservableObject {
             if snapshot.boundBuildID != selectedBuildID {
                 try await client.updateAppStoreVersionBuild(appStoreVersionID: snapshot.appStoreVersionID, buildID: selectedBuildID)
                 snapshot.boundBuildID = selectedBuildID
+                snapshot.builds = snapshot.builds.map { build in
+                    AppStoreReviewBuildOption(
+                        id: build.id,
+                        buildNumber: build.buildNumber,
+                        processingState: build.processingState,
+                        isBound: build.id == selectedBuildID
+                    )
+                }
             }
 
             let submissionID: String

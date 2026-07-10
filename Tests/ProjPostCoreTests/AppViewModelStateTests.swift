@@ -953,6 +953,36 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(appStoreConnect.submittedReviewSubmissionIDs, ["rs-ready"])
     }
 
+    func testSubmitAutoBindKeepsBuildIsBoundConsistentWhenLaterStepFails() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")],
+            // Not yet bound server-side, so submit takes the auto-bind branch.
+            boundAppStoreVersionBuildIDs: [:]
+        )
+        appStoreConnect.submitReviewSubmissionError = TestError.unavailable
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+        viewModel.selectAppStoreReviewBuild("build-1")
+
+        await viewModel.submitSelectedAppStoreReview()
+
+        // The auto-bind call itself succeeded before the later submit step threw.
+        XCTAssertEqual(appStoreConnect.updatedAppStoreVersionBuilds, [FakeAppStoreConnectClient.UpdatedAppStoreVersionBuild(appStoreVersionID: "version-123", buildID: "build-1")])
+        guard case let .failed(_, snapshot) = viewModel.appStoreReviewState, let snapshot else {
+            return XCTFail("Expected failed App Store review snapshot")
+        }
+        XCTAssertEqual(snapshot.boundBuildID, "build-1")
+        XCTAssertEqual(snapshot.builds.first(where: { $0.id == "build-1" })?.isBound, true, "build.isBound must agree with boundBuildID on the failure snapshot")
+    }
+
     func testAutomaticChecksRunOnceWhenReady() async {
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
@@ -1773,6 +1803,7 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
     var activeReviewSubmission: ASCReviewSubmission?
     var addBuildFailuresByGroupID: [String: Error] = [:]
     var enablePublicLinkFailuresByGroupID: [String: Error] = [:]
+    var submitReviewSubmissionError: Error?
     private(set) var fetchAppBundleIDs: [String] = []
     private(set) var fetchBuildRequests: [FetchBuildRequest] = []
     private(set) var fetchBuildsForBetaGroupIDs: [String] = []
@@ -1985,6 +2016,9 @@ private final class FakeAppStoreConnectClient: AppStoreConnectClientProtocol {
 
     func submitReviewSubmission(reviewSubmissionID: String) async throws -> ASCReviewSubmission {
         submittedReviewSubmissionIDs.append(reviewSubmissionID)
+        if let error = submitReviewSubmissionError {
+            throw error
+        }
         let submitted = ASCReviewSubmission(id: reviewSubmissionID, state: "WAITING_FOR_REVIEW")
         activeReviewSubmission = submitted
         return submitted

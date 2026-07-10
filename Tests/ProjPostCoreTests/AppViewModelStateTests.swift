@@ -1006,6 +1006,31 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertNil(snapshot.reviewSubmissionID) // active submission cleared after cancel
     }
 
+    func testCancelAppStoreReviewFailsWithDistinctMessageWhenNoActiveSubmission() async {
+        let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
+        let appStoreConnect = FakeAppStoreConnectClient(
+            app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
+            builds: [ASCBuild(id: "build-1", version: "1", processingState: "VALID")],
+            appStoreVersions: [ASCAppStoreVersion(id: "version-123", versionString: "1.2.6", state: "PREPARE_FOR_SUBMISSION", releaseType: "MANUAL")]
+            // No activeReviewSubmission: the loaded snapshot has reviewSubmissionID == nil.
+        )
+        let viewModel = AppViewModel(
+            store: FakeProjectProfileStore(), accountStore: FakeAppleAccountProfileStore(), credentialVault: FakeCredentialVault(),
+            scanner: FakeProjectScanner(), checkEngine: FakeConfigurationCheckEngine(), uploadRunner: FakeUploadJobRunner(),
+            appStoreConnectClient: appStoreConnect, projects: [project], accountProfiles: [account]
+        )
+        await viewModel.refreshAppStoreReviewStatus()
+
+        await viewModel.cancelAppStoreReview()
+
+        guard case let .failed(message, snapshot) = viewModel.appStoreReviewState, snapshot != nil else {
+            return XCTFail("Expected failed App Store review state with a loaded snapshot")
+        }
+        XCTAssertEqual(message, AppStrings(language: .english).noActiveReviewSubmissionToWithdraw)
+        XCTAssertNotEqual(message, AppStrings(language: .english).loadAppStoreVersionBeforeAction)
+    }
+
     func testUpdateReleaseTypePatchesAndReloads() async {
         let account = AppleAccountProfile(id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!, displayName: "Company", keyID: "KEY1234567", issuerID: "issuer", teamID: "TEAM123", lastVerifiedAt: nil)
         let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)

@@ -65,6 +65,7 @@ private enum AppStoreReviewError: Error, Equatable {
     case versionNotFound(String)
     case buildNotSelected
     case versionNotLoaded
+    case noActiveSubmissionToWithdraw
     case selectedBuildNotBound
 }
 
@@ -1010,7 +1011,7 @@ public final class AppViewModel: ObservableObject {
             return
         }
         guard let submissionID = snapshot.reviewSubmissionID else {
-            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.versionNotLoaded), snapshot: snapshot)
+            appStoreReviewState = .failed(message: appStoreReviewErrorMessage(AppStoreReviewError.noActiveSubmissionToWithdraw), snapshot: snapshot)
             return
         }
         guard let account = accountProfile else {
@@ -1535,6 +1536,8 @@ public final class AppViewModel: ObservableObject {
             return strings.selectBuildBeforeAppStoreReviewAction
         case AppStoreReviewError.versionNotLoaded:
             return strings.loadAppStoreVersionBeforeAction
+        case AppStoreReviewError.noActiveSubmissionToWithdraw:
+            return strings.noActiveReviewSubmissionToWithdraw
         case AppStoreReviewError.selectedBuildNotBound:
             return strings.bindSelectedBuildBeforeSubmittingAppStoreReview
         default:

@@ -408,6 +408,10 @@ public struct AppStrings: Equatable {
         text("Bind the selected build before submitting App Store review.", "提交商店审核前请先绑定所选 Build。")
     }
 
+    public var noActiveReviewSubmissionToWithdraw: String {
+        text("There is no active review submission to withdraw.", "当前没有可撤销的审核提交。")
+    }
+
     public func refreshAppStoreReviewFailed(_ error: Error) -> String {
         text("Refresh App Store review status failed: \(error)", "刷新 App Store 提审状态失败：\(error)")
     }

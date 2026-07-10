@@ -122,7 +122,6 @@ public struct AppStrings: Equatable {
     public var noInternalGroups: String { text("No internal groups found.", "未找到内部测试组。") }
     public var noExternalGroups: String { text("No external TestFlight groups found.", "未找到外部 TestFlight 测试组。") }
     public var linkBuild: String { text("Link Build", "关联构建") }
-    public var autoAfterApproval: String { text("Auto after approval", "审核通过后自动关联") }
     public var internalGroupStatus: String { text("Internal", "内部") }
     public var linkOn: String { text("Link On", "已开启链接") }
     public var linkOff: String { text("Link Off", "未开启链接") }

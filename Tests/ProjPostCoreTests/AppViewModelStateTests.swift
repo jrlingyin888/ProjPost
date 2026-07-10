@@ -58,13 +58,6 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(accountStore.savedProfiles, [])
     }
 
-    func testNewProjectsDefaultExternalGroupAutomationOff() {
-        let project = makeProject(name: "Demo")
-
-        XCTAssertFalse(project.autoLinkExternalGroupsAfterBetaApproval)
-        XCTAssertEqual(project.autoLinkExternalGroupIDsAfterBetaApproval, [])
-    }
-
     func testCheckForUpdatesPublishesAvailableRelease() async {
         let release = AppReleaseInfo(
             version: "1.1.0",
@@ -127,28 +120,6 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(updateChecker.checkCallCount, 1)
         XCTAssertEqual(viewModel.updateState, .idle)
         XCTAssertEqual(viewModel.uploadState, .idle)
-    }
-
-    func testTogglingExternalGroupAutomationPersistsGroupSelectionWithProject() {
-        let project = makeProject(name: "Demo")
-        let store = FakeProjectProfileStore()
-        let viewModel = AppViewModel(
-            store: store,
-            accountStore: FakeAppleAccountProfileStore(),
-            credentialVault: FakeCredentialVault(),
-            scanner: FakeProjectScanner(),
-            checkEngine: FakeConfigurationCheckEngine(),
-            uploadRunner: FakeUploadJobRunner(),
-            projects: [project]
-        )
-
-        viewModel.updateAutoLinkExternalGroup("external-a", isEnabled: true)
-        viewModel.updateAutoLinkExternalGroup("external-b", isEnabled: true)
-        viewModel.updateAutoLinkExternalGroup("external-a", isEnabled: false)
-
-        XCTAssertEqual(viewModel.selectedProject?.autoLinkExternalGroupsAfterBetaApproval, false)
-        XCTAssertEqual(viewModel.selectedProject?.autoLinkExternalGroupIDsAfterBetaApproval, ["external-b"])
-        XCTAssertEqual(store.savedProfiles.first?.autoLinkExternalGroupIDsAfterBetaApproval, ["external-b"])
     }
 
     func testSaveAccountProfilePersistsAccountAndSelectedProjectReferenceImmediately() throws {
@@ -450,8 +421,7 @@ final class AppViewModelStateTests: XCTestCase {
             teamID: "TEAM123",
             lastVerifiedAt: nil
         )
-        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
-        project.autoLinkExternalGroupIDsAfterBetaApproval = ["external-a"]
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
         let allGroups = [
             ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
             ASCBetaGroup(id: "external-a", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: 100),
@@ -499,8 +469,7 @@ final class AppViewModelStateTests: XCTestCase {
             teamID: "TEAM123",
             lastVerifiedAt: nil
         )
-        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
-        project.autoLinkExternalGroupsAfterBetaApproval = false
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
         let external = ASCBetaGroup(id: "external", name: "外部测试", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
         let appStoreConnect = FakeAppStoreConnectClient(
             app: ASCApp(id: "app-123", name: "Demo", bundleID: "com.example.demo"),
@@ -539,8 +508,7 @@ final class AppViewModelStateTests: XCTestCase {
             teamID: "TEAM123",
             lastVerifiedAt: nil
         )
-        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
-        project.autoLinkExternalGroupsAfterBetaApproval = false
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
         let internalGroup = ASCBetaGroup(id: "internal", name: "内部测试", isInternalGroup: true, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
         let externalGroup = ASCBetaGroup(id: "external", name: "外部测试", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)
         let appStoreConnect = FakeAppStoreConnectClient(
@@ -576,8 +544,7 @@ final class AppViewModelStateTests: XCTestCase {
             teamID: "TEAM123",
             lastVerifiedAt: nil
         )
-        var project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
-        project.autoLinkExternalGroupsAfterBetaApproval = false
+        let project = makeProject(name: "Demo", version: "1.2.6", buildNumber: "1", selectedAccountID: account.id)
         let groups = [
             ASCBetaGroup(id: "external-a", name: "外部测试 A", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil),
             ASCBetaGroup(id: "external-b", name: "外部测试 B", isInternalGroup: false, publicLinkEnabled: false, publicLink: nil, publicLinkLimit: nil)

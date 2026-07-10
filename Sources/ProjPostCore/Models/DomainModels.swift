@@ -27,8 +27,6 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
     public var selectedAccountID: UUID?
     public var lastUpload: UploadSummary?
     public var appliedSettings: ProjectAppliedSettings?
-    public var autoLinkExternalGroupsAfterBetaApproval: Bool
-    public var autoLinkExternalGroupIDsAfterBetaApproval: Set<String>
 
     public init(
         id: UUID = UUID(),
@@ -44,9 +42,7 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
         teamID: String?,
         selectedAccountID: UUID?,
         lastUpload: UploadSummary?,
-        appliedSettings: ProjectAppliedSettings? = nil,
-        autoLinkExternalGroupsAfterBetaApproval: Bool = false,
-        autoLinkExternalGroupIDsAfterBetaApproval: Set<String> = []
+        appliedSettings: ProjectAppliedSettings? = nil
     ) {
         self.id = id
         self.name = name
@@ -66,8 +62,6 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
             version: version,
             buildNumber: buildNumber
         )
-        self.autoLinkExternalGroupsAfterBetaApproval = autoLinkExternalGroupsAfterBetaApproval
-        self.autoLinkExternalGroupIDsAfterBetaApproval = autoLinkExternalGroupIDsAfterBetaApproval
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -85,8 +79,6 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
         case selectedAccountID
         case lastUpload
         case appliedSettings
-        case autoLinkExternalGroupsAfterBetaApproval
-        case autoLinkExternalGroupIDsAfterBetaApproval
     }
 
     public init(from decoder: Decoder) throws {
@@ -109,8 +101,6 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
             version: version,
             buildNumber: buildNumber
         )
-        autoLinkExternalGroupsAfterBetaApproval = try container.decodeIfPresent(Bool.self, forKey: .autoLinkExternalGroupsAfterBetaApproval) ?? false
-        autoLinkExternalGroupIDsAfterBetaApproval = try container.decodeIfPresent(Set<String>.self, forKey: .autoLinkExternalGroupIDsAfterBetaApproval) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -129,8 +119,6 @@ public struct ProjectProfile: Codable, Equatable, Identifiable {
         try container.encodeIfPresent(selectedAccountID, forKey: .selectedAccountID)
         try container.encodeIfPresent(lastUpload, forKey: .lastUpload)
         try container.encodeIfPresent(appliedSettings, forKey: .appliedSettings)
-        try container.encode(autoLinkExternalGroupsAfterBetaApproval, forKey: .autoLinkExternalGroupsAfterBetaApproval)
-        try container.encode(autoLinkExternalGroupIDsAfterBetaApproval, forKey: .autoLinkExternalGroupIDsAfterBetaApproval)
     }
 
     public var versionDisplay: String {

@@ -557,28 +557,6 @@ public final class AppViewModel: ObservableObject {
         refreshPrivateKeyStatus()
     }
 
-    public func updateAutoLinkExternalGroupsAfterBetaApproval(_ value: Bool) {
-        guard !isOperationRunning else { return }
-        mutateSelectedProject(invalidateChecks: false) { project in
-            project.autoLinkExternalGroupsAfterBetaApproval = value
-            if !value {
-                project.autoLinkExternalGroupIDsAfterBetaApproval.removeAll()
-            }
-        }
-    }
-
-    public func updateAutoLinkExternalGroup(_ groupID: String, isEnabled: Bool) {
-        guard !isOperationRunning else { return }
-        mutateSelectedProject(invalidateChecks: false) { project in
-            project.autoLinkExternalGroupsAfterBetaApproval = false
-            if isEnabled {
-                project.autoLinkExternalGroupIDsAfterBetaApproval.insert(groupID)
-            } else {
-                project.autoLinkExternalGroupIDsAfterBetaApproval.remove(groupID)
-            }
-        }
-    }
-
     public func saveAccountProfile() {
         guard !isOperationRunning else { return }
         let workingAccountID = ensureWorkingAccountID()
@@ -1197,14 +1175,12 @@ public final class AppViewModel: ObservableObject {
             updated.name = projects[index].name.isEmpty ? project.name : projects[index].name
             updated.selectedAccountID = projects[index].selectedAccountID
             updated.lastUpload = projects[index].lastUpload
-            updated.autoLinkExternalGroupsAfterBetaApproval = projects[index].autoLinkExternalGroupsAfterBetaApproval
             projects[index] = updated
         } else if let index = projects.firstIndex(where: { $0.projectPath == project.projectPath }) {
             var updated = project
             updated.id = projects[index].id
             updated.selectedAccountID = projects[index].selectedAccountID
             updated.lastUpload = projects[index].lastUpload
-            updated.autoLinkExternalGroupsAfterBetaApproval = projects[index].autoLinkExternalGroupsAfterBetaApproval
             projects[index] = updated
             selectedProjectID = updated.id
         } else {

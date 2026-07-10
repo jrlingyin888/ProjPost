@@ -311,6 +311,13 @@ final class AppStoreConnectClientTests: XCTestCase {
         XCTAssertEqual(request.queryItems["limit"], "200")
     }
 
+    func testDefaultTransportUsesBoundedRequestTimeout() {
+        // A stalled App Store Connect call must fail fast instead of hanging the UI forever.
+        let transport = URLSessionASCTransport()
+        XCTAssertEqual(transport.session.configuration.timeoutIntervalForRequest, URLSessionASCTransport.defaultRequestTimeout)
+        XCTAssertFalse(transport.session.configuration.waitsForConnectivity)
+    }
+
     func testSubmitReviewSubmissionMarksSubmissionSubmitted() async throws {
         let transport = StubASCTransport(responses: [
             ASCTransportResponse(statusCode: 200, body: #"{"data":{"id":"review-123","type":"reviewSubmissions","attributes":{"state":"WAITING_FOR_REVIEW"}}}"#)

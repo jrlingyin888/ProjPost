@@ -438,7 +438,10 @@ final class AppViewModelStateTests: XCTestCase {
         XCTAssertEqual(snapshot.externalGroups.first?.publicLink, "https://testflight.apple.com/join/a")
     }
 
-    func testApprovedBuildAutoLinksSelectedExternalGroupsAndEnablesPublicLinks() async {
+    func testRefreshTestFlightStatusIsReadOnlyEvenWhenAutoLinkConfigured() async {
+        // Refreshing (and auto-load on entry) must only read/display status — never
+        // silently link external groups — even for an approved build whose groups were
+        // previously flagged for auto-link. Linking is an explicit user action.
         let account = AppleAccountProfile(
             id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
             displayName: "Company",
@@ -476,13 +479,15 @@ final class AppViewModelStateTests: XCTestCase {
 
         await viewModel.refreshLatestBuildTestFlightStatus()
 
-        XCTAssertEqual(appStoreConnect.addedBuildsToGroups.map(\.betaGroupID), ["external-a"])
-        XCTAssertEqual(appStoreConnect.enabledPublicLinks.map(\.betaGroupID), ["external-a"])
+        // No writes: refresh performed no addBuild / enablePublicLink calls.
+        XCTAssertTrue(appStoreConnect.addedBuildsToGroups.isEmpty)
+        XCTAssertTrue(appStoreConnect.enabledPublicLinks.isEmpty)
         guard case let .loaded(snapshot) = viewModel.testFlightDistributionState else {
-            return XCTFail("Expected loaded snapshot after automation")
+            return XCTFail("Expected loaded snapshot after read-only refresh")
         }
-        XCTAssertEqual(snapshot.externalGroups.map(\.isCurrentBuildAssociated), [true, true])
-        XCTAssertEqual(snapshot.externalGroups.map(\.publicLinkEnabled), [true, true])
+        // Snapshot reflects the true remote state, unchanged by the refresh.
+        XCTAssertEqual(snapshot.externalGroups.map(\.isCurrentBuildAssociated), [false, true])
+        XCTAssertEqual(snapshot.externalGroups.map(\.publicLinkEnabled), [false, true])
     }
 
     func testApprovedBuildDoesNotAutoLinkWhenAutomationDisabled() async {

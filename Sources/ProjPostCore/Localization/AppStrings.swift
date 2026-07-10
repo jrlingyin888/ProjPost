@@ -130,6 +130,8 @@ public struct AppStrings: Equatable {
     public var notLinked: String { text("Not Linked", "未关联") }
     public var publicLinkPendingFromApple: String { text("Public link pending from Apple.", "公开链接等待 Apple 生成。") }
     public var publicLinkNotEnabled: String { text("Public link not enabled.", "公开链接未开启。") }
+    public var copyLink: String { text("Copy link", "复制链接") }
+    public var copied: String { text("Copied", "已复制") }
 
     public var appStoreReview: String { text("App Store Review", "App Store 提审") }
     public var refreshStoreStatus: String { text("Refresh Store Status", "刷新商店状态") }

@@ -1,3 +1,4 @@
+import AppKit
 import ProjPostCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -26,6 +27,7 @@ struct ProjectDetailView: View {
     @State private var showAdvancedStoreFields = false
     @State private var showWithdrawConfirm = false
     @State private var showReleaseConfirm = false
+    @State private var copiedLinkGroupID: String?
 
     private var strings: AppStrings {
         AppStrings(language: localizationStore.language)
@@ -42,6 +44,9 @@ struct ProjectDetailView: View {
                 UploadProgressView(state: viewModel.uploadState, events: viewModel.uploadEvents)
             }
             .padding(20)
+        }
+        .task(id: viewModel.latestBuildStatusTrigger) {
+            await viewModel.refreshLatestBuildTestFlightStatusIfNeeded()
         }
         .fileImporter(
             isPresented: $showAccountFileImporter,
@@ -568,30 +573,46 @@ struct ProjectDetailView: View {
 
             if !group.isInternalGroup {
                 HStack(spacing: 10) {
-                    Button {
-                        Task {
-                            await viewModel.linkExternalGroupForLatestBuild(groupID: group.id)
+                    if group.isCurrentBuildAssociated {
+                        Label(strings.linked, systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.green)
+                    } else {
+                        Button {
+                            Task {
+                                await viewModel.linkExternalGroupForLatestBuild(groupID: group.id)
+                            }
+                        } label: {
+                            Label(strings.linkBuild, systemImage: "link")
                         }
-                    } label: {
-                        Label(strings.linkBuild, systemImage: "link")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isOperationRunning || (group.isCurrentBuildAssociated && group.publicLinkEnabled))
-
-                    Toggle(strings.autoAfterApproval, isOn: autoLinkExternalGroupBinding(groupID: group.id))
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
+                        .buttonStyle(.bordered)
                         .disabled(viewModel.isOperationRunning)
+                    }
 
                     Spacer()
                 }
             }
 
             if let publicLink = group.publicLink, !publicLink.isEmpty {
-                Text(publicLink)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .foregroundStyle(.blue)
+                HStack(spacing: 6) {
+                    Text(publicLink)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .foregroundStyle(.blue)
+                    Button {
+                        copyPublicLink(publicLink, groupID: group.id)
+                    } label: {
+                        Image(systemName: copiedLinkGroupID == group.id ? "checkmark" : "doc.on.doc")
+                            .foregroundStyle(copiedLinkGroupID == group.id ? .green : .secondary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(strings.copyLink)
+                    if copiedLinkGroupID == group.id {
+                        Text(strings.copied)
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                }
             } else if !group.isInternalGroup {
                 Text(group.publicLinkEnabled ? strings.publicLinkPendingFromApple : strings.publicLinkNotEnabled)
                     .font(.caption)
@@ -614,15 +635,16 @@ struct ProjectDetailView: View {
         .padding(.vertical, 4)
     }
 
-    private func autoLinkExternalGroupBinding(groupID: String) -> Binding<Bool> {
-        Binding(
-            get: {
-                viewModel.selectedProject?.autoLinkExternalGroupIDsAfterBetaApproval.contains(groupID) ?? false
-            },
-            set: { isEnabled in
-                viewModel.updateAutoLinkExternalGroup(groupID, isEnabled: isEnabled)
+    private func copyPublicLink(_ link: String, groupID: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(link, forType: .string)
+        copiedLinkGroupID = groupID
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if copiedLinkGroupID == groupID {
+                copiedLinkGroupID = nil
             }
-        )
+        }
     }
 
     private func groupStatusText(_ group: TestFlightDistributionGroup) -> String {

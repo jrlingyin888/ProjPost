@@ -915,10 +915,22 @@ public final class AppStoreConnectClient: AppStoreConnectClientProtocol {
 
 public final class URLSessionASCTransport: ASCTransport {
     private let baseURL = URL(string: "https://api.appstoreconnect.apple.com")!
-    private let session: URLSession
+    let session: URLSession
 
-    public init(session: URLSession = .shared) {
-        self.session = session
+    /// A request-scoped timeout so a stalled App Store Connect call fails fast
+    /// with an error instead of leaving the UI stuck on a spinner indefinitely.
+    public static let defaultRequestTimeout: TimeInterval = 30
+
+    private static func makeDefaultSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = defaultRequestTimeout
+        configuration.timeoutIntervalForResource = defaultRequestTimeout * 2
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }
+
+    public init(session: URLSession? = nil) {
+        self.session = session ?? URLSessionASCTransport.makeDefaultSession()
     }
 
     public func send(_ request: ASCRequest) async throws -> ASCTransportResponse {

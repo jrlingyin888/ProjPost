@@ -817,28 +817,17 @@ public final class AppViewModel: ObservableObject {
         betaReviewState = .running
         testFlightDistributionState = .loading
         do {
+            // Read-only: refreshing (and auto-load on entry) only loads and displays
+            // TestFlight status. Linking external groups is an explicit user action
+            // (see linkExternalGroupForLatestBuild), never a silent side effect of a refresh.
             let loaded = try await loadLatestBuildDistribution(project: project, account: account)
             let snapshot = loaded.snapshot
-            var finalSnapshot = snapshot
-            var linkFailureCount = 0
-            let autoGroupIDs = project.autoLinkExternalGroupIDsAfterBetaApproval
-            if !autoGroupIDs.isEmpty,
-               snapshot.betaReviewState == "APPROVED",
-               !snapshot.externalGroups.isEmpty {
-                testFlightDistributionState = .linking(snapshot)
-                let result = await linkExternalGroups(snapshot: snapshot, client: loaded.client, targetGroupIDs: autoGroupIDs)
-                finalSnapshot = result.snapshot
-                linkFailureCount = result.failureCount
-            }
-
-            if linkFailureCount > 0 {
-                betaReviewState = .failed(message: strings.linkedExternalGroupsWithFailureCount(linkFailureCount))
-            } else if let processingState = snapshot.processingState, processingState != "VALID" {
+            if let processingState = snapshot.processingState, processingState != "VALID" {
                 betaReviewState = .succeeded(message: strings.testFlightStatus(snapshot.betaReviewStateText, processingState: processingState))
             } else {
                 betaReviewState = .succeeded(message: strings.testFlightStatus(snapshot.betaReviewStateText))
             }
-            testFlightDistributionState = .loaded(finalSnapshot)
+            testFlightDistributionState = .loaded(snapshot)
         } catch {
             let message = testFlightDistributionErrorMessage(error)
             betaReviewState = .failed(message: message)
